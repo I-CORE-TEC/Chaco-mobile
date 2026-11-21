@@ -377,6 +377,27 @@ test('Puerta: arranca con el DNI buscado; sin traslado ni personas no manda y lo
   } finally { await ui.close(); }
 });
 
+test('Puerta: la asistencia sigue al grupo (lactantes con menores, con tope) y lo oculto no viaja', async () => {
+  const ui = await montarPuerta(() => response(201, INGRESO));
+  const boton = (label) => ui.pressables().find((n) => n.props.accessibilityLabel === label);
+  try {
+    assert.equal(boton('Sumar Lactantes'), undefined);
+    assert.ok(ui.labels().some((l) => l.includes('Lactantes aparece si ingresan menores.')));
+    // Sin sexo en la puerta, la responsable puede ser mujer: «Embarazo» se muestra.
+    assert.ok(boton('Embarazo'));
+    await ui.press('Sumar Menores · Varones');
+    await ui.press('Sumar Lactantes');
+    assert.equal(boton('Sumar Lactantes').props.disabled, true);
+    await ui.press('Restar Menores · Varones');
+    assert.equal(boton('Sumar Lactantes'), undefined);
+    await ui.llenar();
+    await ui.pressButton('Ingresar igual');
+    await ui.aceptarAlerta('Ingresar igual');
+    const [post] = posts(ui.calls);
+    assert.equal(post.body.lactantes, 0, 'lactantes oculto: va en 0 aunque estaba cargado');
+  } finally { await ui.close(); }
+});
+
 test('Puerta: sin camas solo ofrece «Avisar a la mesa»; avisar confirma, manda al mismo cuerpo y vuelve', async () => {
   const ui = await montarPuerta(() => response(201, AVISO), {plazasLibres: 0, accion: 'ingresar'});
   try {

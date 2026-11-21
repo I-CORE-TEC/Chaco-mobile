@@ -20,8 +20,8 @@ import { aJpeg } from '../utils/jpeg';
 import { cleanDigits, isValidDni, normalizeDateText, normalizeSex, parseDniCode } from '../utils/dni';
 import {
   ASISTENCIA, AVISOS, CANTIDADES, FOTOS, MAX_DIRECCION, MAX_TRASLADO_OTRO, SEXOS, TRASLADOS,
-  aCantidad, filtrarLocalidades, hayErrores, listaDeErrores, mismaIdentidad, personaConfirmada, textoDeCode, totalDeclarado,
-  validarCaso, validarConsulta,
+  aCantidad, asistenciaVisible, filtrarLocalidades, hayErrores, listaDeErrores, mismaIdentidad, personaConfirmada, textoDeCode,
+  textoDeOcultos, topesAsistencia, totalDeclarado, validarCaso, validarConsulta,
 } from '../utils/emergencia';
 import { statusTones } from '../theme/statusBadges';
 import { keyboardDismissModeFor } from '../utils/teclado';
@@ -424,8 +424,10 @@ export default function EmergenciaFormulario1Screen({ uuid = null, onTerminar })
     </View>
   );
 
-  const contador = ({ clave, titulo }) => {
+  // `tope`: hasta dónde deja sumar (lactantes ≤ menores, etc.); sin tope, sin límite.
+  const contador = ({ clave, titulo, tope = Infinity }) => {
     const valor = aCantidad(datos[clave]);
+    const enTope = valor >= tope;
     return (
       <View style={styles.contador}>
         <Text style={[styles.flex, etiqueta]}>{titulo}</Text>
@@ -435,9 +437,9 @@ export default function EmergenciaFormulario1Screen({ uuid = null, onTerminar })
           <Ionicons name="remove" size={20} color={theme.colors.text} accessible={false} importantForAccessibility="no" />
         </Pressable>
         <Text accessibilityLabel={`${titulo}: ${valor}`} style={[styles.valor, { color: theme.colors.text, fontFamily: typography.bold }]}>{valor}</Text>
-        <Pressable accessibilityRole="button" accessibilityLabel={`Sumar ${titulo}`}
-          onPress={() => cambiar({ [clave]: valor + 1 })}
-          style={[styles.paso, { borderColor: theme.colors.border }]}>
+        <Pressable accessibilityRole="button" accessibilityLabel={`Sumar ${titulo}`} disabled={enTope}
+          accessibilityState={{ disabled: enTope }} onPress={() => cambiar({ [clave]: valor + 1 })}
+          style={[styles.paso, { borderColor: theme.colors.border, opacity: enTope ? 0.4 : 1 }]}>
           <Ionicons name="add" size={20} color={theme.colors.text} accessible={false} importantForAccessibility="no" />
         </Pressable>
       </View>
@@ -463,6 +465,9 @@ export default function EmergenciaFormulario1Screen({ uuid = null, onTerminar })
   );
 
   const total = totalDeclarado(datos);
+  const visible = asistenciaVisible(datos);
+  const topes = topesAsistencia(datos);
+  const ocultos = textoDeOcultos(visible);
   const confirmada = personaConfirmada(datos.consulta, datos);
   const sugeridas = filtrarLocalidades(localidades, busquedaLocalidad);
   const conUbicacion = datos.latitud != null && datos.longitud != null;
@@ -537,13 +542,14 @@ export default function EmergenciaFormulario1Screen({ uuid = null, onTerminar })
 
       <View style={tarjeta}>
         <Text accessibilityRole="header" style={tituloSeccion}>3. Quiénes necesitan asistencia</Text>
-        {ASISTENCIA.map((c) => (
+        {ASISTENCIA.filter((c) => visible[c.clave]).map((c) => (
           <View key={c.clave}>
-            {contador({ clave: c.clave, titulo: c.titulo })}
+            {contador({ clave: c.clave, titulo: c.titulo, tope: topes[c.clave] })}
             {errorCampo([c.clave])}
           </View>
         ))}
-        {AVISOS.map((c) => <React.Fragment key={c.clave}>{casilla(c)}</React.Fragment>)}
+        {AVISOS.filter((c) => visible[c.clave]).map((c) => <React.Fragment key={c.clave}>{casilla(c)}</React.Fragment>)}
+        {ocultos ? <Text style={ayuda}>{ocultos}</Text> : null}
       </View>
 
       <View style={tarjeta}>

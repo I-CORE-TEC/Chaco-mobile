@@ -92,8 +92,11 @@ test('el responsable suma aparte: los contadores son los acompañantes', async (
   assert.equal(r.validarCaso({...nuevo, adultos_f: 0, mayores_dependientes: 1}).mayores_dependientes, undefined,
     'el responsable solo puede ser el mayor dependiente');
   assert.ok(r.validarCaso({...nuevo, adultos_f: 0, mayores_dependientes: 2}).mayores_dependientes);
-  assert.ok(r.validarCaso(r.conDatosGuardados({...VALIDO, mayores_dependientes: 1})).mayores_dependientes,
+  assert.ok(r.validarCaso(r.conDatosGuardados({...VALIDO, mayores_f: 1, mayores_dependientes: 2})).mayores_dependientes,
     'sin la marca el tope es el de siempre');
+  assert.equal(r.validarCaso(r.conDatosGuardados({...VALIDO, mayores_dependientes: 1})).mayores_dependientes, undefined,
+    'sin la marca y sin mayores el campo no se muestra: no se valida');
+  assert.equal(r.datosDelCaso(r.conDatosGuardados({...VALIDO, mayores_dependientes: 1})).mayores_dependientes, 0);
   assert.equal(r.datosDelCaso(nuevo).responsable_aparte, true);
   // Lo guardado antes de la marca (borrador, cola o puerta) contó al responsable adentro: no se le suma otra vez.
   const viejo = r.conDatosGuardados({...VALIDO, adultos_f: 2});
@@ -101,6 +104,73 @@ test('el responsable suma aparte: los contadores son los acompañantes', async (
   assert.equal(r.totalDeclarado(viejo), 2);
   assert.equal(r.datosDelCaso(viejo).responsable_aparte, false);
   assert.equal(r.conDatosGuardados({...nuevo}).responsable_aparte, true);
+});
+
+const HOY = new Date(2026, 10, 21);
+
+test('asistencia según el grupo: embarazo, lactantes y mayores con dependencia', async () => {
+  const r = await cargar();
+  const base = {...r.datosIniciales(), ...VALIDO, adultos_f: 0};
+  const ver = (extra) => plano(r.asistenciaVisible({...base, ...extra}, HOY));
+  // Siempre a la vista.
+  for (const clave of ['dependientes', 'electrodependiente', 'medicacion_critica', 'mascotas']) {
+    assert.equal(ver({sexo: 'M'})[clave], true, clave);
+  }
+  // Embarazo: alguna mujer menor o adulta, o la responsable si no es mayor; sin sexo cargado, puede ser mujer.
+  assert.equal(ver({sexo: 'M', adultos_m: 2, menores_m: 1}).embarazo, false, 'todos varones');
+  assert.equal(ver({sexo: 'M', mayores_f: 2}).embarazo, false, 'solo mujeres mayores');
+  assert.equal(ver({sexo: 'M', menores_f: 1}).embarazo, true, 'las menores cuentan');
+  assert.equal(ver({sexo: 'M', adultos_f: 1}).embarazo, true);
+  assert.equal(ver({sexo: 'F'}).embarazo, true, 'responsable mujer sola');
+  assert.equal(ver({sexo: ''}).embarazo, true, 'sin sexo no se descarta');
+  assert.equal(ver({sexo: 'F', fecha_nacimiento: '01/01/1950'}).embarazo, false, 'responsable mayor');
+  assert.equal(ver({sexo: 'F', fecha_nacimiento: '1990-05-10'}).embarazo, true);
+  // Lactantes: con menores.
+  assert.equal(ver({sexo: 'F'}).lactantes, false);
+  assert.equal(ver({sexo: 'F', menores_m: 1}).lactantes, true);
+  // Mayores con dependencia: con mayores, o el responsable mayor o sin fecha.
+  assert.equal(ver({sexo: 'M'}).mayores_dependientes, true, 'sin fecha el responsable puede ser mayor');
+  assert.equal(ver({sexo: 'M', fecha_nacimiento: '10/05/1990'}).mayores_dependientes, false);
+  assert.equal(ver({sexo: 'M', fecha_nacimiento: '10/05/1960'}).mayores_dependientes, true);
+  assert.equal(ver({sexo: 'M', fecha_nacimiento: '10/05/1990', mayores_m: 1}).mayores_dependientes, true);
+  // Lo guardado antes de la marca tiene al responsable adentro de las franjas: no se lo mira aparte.
+  const viejo = (extra) => plano(r.asistenciaVisible(r.conDatosGuardados({...VALIDO, adultos_f: 0, ...extra}), HOY));
+  assert.equal(viejo({sexo: 'F', adultos_m: 1}).embarazo, false);
+  assert.equal(viejo({adultos_m: 1}).mayores_dependientes, false);
+  assert.match(r.textoDeOcultos(ver({sexo: 'M', fecha_nacimiento: '10/05/1990'})), /Embarazo.*Lactantes.*Mayores/);
+  assert.equal(r.textoDeOcultos(ver({sexo: '', menores_f: 1})), null);
+});
+
+test('edadEn: años cumplidos, null sin fecha válida', async () => {
+  const r = await cargar();
+  assert.equal(r.edadEn('21/11/1966', HOY), 60);
+  assert.equal(r.edadEn('22/11/1966', HOY), 59);
+  assert.equal(r.edadEn('1966-11-21', HOY), 60);
+  assert.equal(r.edadEn('', HOY), null);
+  assert.equal(r.edadEn('31/02/1990', HOY), null);
+  assert.equal(r.edadEn('01/01/2030', HOY), null);
+});
+
+test('topes de asistencia: no más que el grupo que los puede tener', async () => {
+  const r = await cargar();
+  const datos = {...r.datosIniciales(), ...VALIDO, adultos_f: 1, menores_m: 2, mayores_f: 1};
+  assert.deepEqual(plano(r.topesAsistencia(datos, HOY)), {dependientes: 5, mayores_dependientes: 2, lactantes: 2});
+  assert.equal(r.topesAsistencia({...datos, fecha_nacimiento: '10/05/1990'}, HOY).mayores_dependientes, 1,
+    'el responsable adulto no puede ser el mayor');
+  assert.ok(r.validarCaso({...datos, sexo: 'M', fecha_nacimiento: '10/05/1990', mayores_dependientes: 2}).mayores_dependientes);
+});
+
+test('lo oculto se conserva en el borrador pero no se valida y se envía en 0 / false', async () => {
+  const r = await cargar();
+  const varones = {...r.datosIniciales(), ...VALIDO, adultos_f: 0, adultos_m: 2, sexo: 'M', fecha_nacimiento: '10/05/1990',
+    embarazo: true, lactantes: 3, mayores_dependientes: 1, mascotas: true, dependientes: 1};
+  assert.deepEqual(plano(r.validarCaso(varones)), {});
+  const caso = r.datosDelCaso(varones);
+  assert.equal(caso.embarazo, false); assert.equal(caso.lactantes, 0); assert.equal(caso.mayores_dependientes, 0);
+  assert.equal(caso.mascotas, true); assert.equal(caso.dependientes, 1);
+  // Si el grupo vuelve a permitirlo, sale lo que estaba cargado.
+  const conMujer = r.datosDelCaso({...varones, adultos_f: 1, menores_m: 3});
+  assert.equal(conMujer.embarazo, true); assert.equal(conMujer.lactantes, 3);
 });
 
 test('dirección obligatoria hasta 240 y GPS en rango', async () => {

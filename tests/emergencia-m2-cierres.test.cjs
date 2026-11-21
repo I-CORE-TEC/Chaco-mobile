@@ -221,8 +221,10 @@ test('puerta: validación sin dirección ni nombre obligatorios; el resto como M
   // Sin acompañantes la familia es el responsable: el total ya es 1.
   igual(Object.keys(l.validarPuerta(l.datosDeLaPuerta('30111222'))).sort(), ['traslado']);
   igual(l.validarPuerta({...l.datosDeLaPuerta('30111222'), traslado: 'POLICIA', adultos_m: 1}), {});
-  igual(Object.keys(l.validarPuerta({...l.datosDeLaPuerta('30111222'), traslado: 'POLICIA', adultos_m: 1, direccion: 'x'.repeat(241), lactantes: 1})).sort(),
+  igual(Object.keys(l.validarPuerta({...l.datosDeLaPuerta('30111222'), traslado: 'POLICIA', menores_m: 1, direccion: 'x'.repeat(241), lactantes: 2})).sort(),
     ['direccion', 'lactantes']);
+  // Sin menores «Lactantes» no se muestra: no se valida (se envía en 0).
+  igual(Object.keys(l.validarPuerta({...l.datosDeLaPuerta('30111222'), traslado: 'POLICIA', adultos_m: 1, lactantes: 1})), []);
   assert.equal(l.datosDeLaPuerta('30.111.222').dni, '30111222');
 });
 
