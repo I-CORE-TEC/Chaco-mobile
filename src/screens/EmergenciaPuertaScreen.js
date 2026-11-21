@@ -12,7 +12,7 @@ import {
 } from '../services/emergenciaLlegadas';
 import { cleanDigits } from '../utils/dni';
 import {
-  ASISTENCIA, AVISOS, CANTIDADES, MAX_DIRECCION, MAX_TRASLADO_OTRO, TRASLADOS, aCantidad, asistenciaVisible, listaDeErrores, textoDeOcultos, topesAsistencia, totalDeclarado,
+  ASISTENCIA, AVISOS, CANTIDADES, MAX_DIRECCION, MAX_TRASLADO_OTRO, SEXOS, TRASLADOS, aCantidad, asistenciaVisible, listaDeErrores, textoDeOcultos, topesAsistencia, totalDeclarado,
 } from '../utils/emergencia';
 import { statusTones } from '../theme/statusBadges';
 import { keyboardDismissModeFor } from '../utils/teclado';
@@ -381,6 +381,21 @@ export default function EmergenciaPuertaScreen({
           style={caja(['dni'])} />
         <Text style={ayuda}>{TEXTO_DNI_FIJO}</Text>
         {errorCampo(['dni'])}
+        {/* Solo para la pantalla (no viaja): con «Masculino» no se ofrece «Embarazo» para el responsable. */}
+        <Text style={etiqueta}>Sexo (como figura en el DNI, opcional)</Text>
+        <View style={styles.opciones} accessibilityRole="radiogroup" accessibilityLabel="Sexo">
+          {SEXOS.map((opcion) => {
+            const elegida = datos.sexo === opcion.valor;
+            return (
+              <Pressable key={opcion.valor} accessibilityRole="radio" accessibilityState={{ selected: elegida, checked: elegida, disabled: fijo }}
+                accessibilityLabel={`Sexo: ${opcion.titulo}`} disabled={fijo} onPress={() => cambiar({ sexo: elegida ? '' : opcion.valor })}
+                style={[styles.opcion, { borderColor: elegida ? theme.colors.primary : theme.colors.border,
+                  backgroundColor: elegida ? `${theme.colors.primary}18` : theme.colors.surface }]}>
+                <Text style={{ color: elegida ? theme.colors.primary : theme.colors.text, fontFamily: elegida ? typography.bold : typography.medium, fontSize: fontSizes.sm }}>{opcion.titulo}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
         <Text style={etiqueta}>Nombre</Text>
         <TextInput value={datos.nombre} editable={!fijo} onChangeText={(t) => cambiar({ nombre: t })} autoCapitalize="words"
           accessibilityLabel="Nombre" placeholderTextColor={theme.colors.textSoft} style={caja(['nombre'])} />
