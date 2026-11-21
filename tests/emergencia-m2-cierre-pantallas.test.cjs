@@ -390,11 +390,22 @@ test('Puerta: la asistencia sigue al grupo (lactantes con menores, con tope) y l
     assert.equal(boton('Sumar Lactantes').props.disabled, true);
     await ui.press('Restar Menores · Varones');
     assert.equal(boton('Sumar Lactantes'), undefined);
-    await ui.llenar();
+    // Con el sexo «Masculino» y sin mujeres no se ofrece «Embarazo»; tocar de nuevo lo deja sin elegir.
+    await ui.press('Embarazo');
+    await ui.press('Sexo: Masculino');
+    assert.equal(boton('Embarazo'), undefined);
+    assert.ok(ui.labels().some((l) => l.includes('Embarazo aparece si ingresa alguna mujer menor o adulta.')));
+    await ui.press('Sexo: Masculino');
+    assert.ok(boton('Embarazo'));
+    await ui.press('Sexo: Masculino');
+    await ui.press('Traslado: Policía');
+    await ui.press('Sumar Adultos · Varones');
     await ui.pressButton('Ingresar igual');
     await ui.aceptarAlerta('Ingresar igual');
     const [post] = posts(ui.calls);
     assert.equal(post.body.lactantes, 0, 'lactantes oculto: va en 0 aunque estaba cargado');
+    assert.equal(post.body.embarazo, false, 'embarazo oculto: va en false aunque estaba marcado');
+    assert.ok(!('sexo' in post.body), 'el sexo no viaja');
   } finally { await ui.close(); }
 });
 

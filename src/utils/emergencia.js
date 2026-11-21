@@ -139,6 +139,7 @@ export const fechaValida = (valor) => {
 // Un campo oculto conserva lo cargado en el borrador (si vuelve a aparecer, está como estaba), pero no
 // se valida y se envía en 0 / false.
 export const EDAD_MENOR = 18;
+// Persona mayor desde los 60, como la Convención Interamericana (Ley 27.360).
 export const EDAD_MAYOR = 60;
 
 // Años cumplidos a `hoy` con una fecha DD/MM/AAAA o AAAA-MM-DD; null si no hay una fecha válida.

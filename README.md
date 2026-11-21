@@ -240,8 +240,9 @@ fotos (dirección, localidad, GPS opcional y hasta dos fotos JPEG). Funciona sin
 - Desde 1.2.24 «Quiénes necesitan asistencia» sigue al grupo (`asistenciaVisible`, en el Formulario 1 y en
   la puerta): «Embarazo» solo con alguna mujer menor o adulta (o la responsable, si no es
   mayor), «Lactantes» solo con menores y «Mayores con dependencia» solo con mayores (o si el
-  responsable es mayor o no tiene fecha de nacimiento). Sin sexo cargado (la puerta no lo
-  pide) el responsable puede ser mujer. Mayor es desde `EDAD_MAYOR` (60) años. Lo oculto
+  responsable es mayor o no tiene fecha de nacimiento). Sin sexo cargado (en la puerta es
+  opcional desde 1.2.25 y no viaja) el responsable puede ser mujer. Mayor es desde
+  `EDAD_MAYOR` (60) años, como la Convención Interamericana de personas mayores (Ley 27.360). Lo oculto
   queda en el borrador como estaba, pero no se valida y `datosDelCaso` lo manda en 0 / false.
   Los contadores no dejan sumar más que el grupo (`topesAsistencia`).
 
