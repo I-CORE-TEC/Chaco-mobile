@@ -9,7 +9,7 @@ existente cuando vuelve la conectividad.
 ni un servidor de aplicación en ejecución dentro del contenedor final. El backend
 sigue siendo Chaco; este repositorio no agrega otro backend.
 
-Repositorio: [Mkdir-arg/Chaco-mobile](https://github.com/Mkdir-arg/Chaco-mobile).
+Repositorio: [I-CORE-TEC/Chaco-mobile](https://github.com/I-CORE-TEC/Chaco-mobile).
 Ejecutar todos los comandos desde su raíz, independientemente de dónde esté
 clonado. Tiene historial, ramas y CI propios; no es una carpeta del backend.
 La rama de entrega a test es `test`.
@@ -523,7 +523,7 @@ Requisitos: Node.js 22.14.0 o superior dentro de la rama 22, npm y acceso al bac
 que se quiera probar. Para la PWA no se necesita Expo Go, Android Studio ni EAS.
 
 ```sh
-git clone --branch test https://github.com/Mkdir-arg/Chaco-mobile.git
+git clone --branch test https://github.com/I-CORE-TEC/Chaco-mobile.git
 cd Chaco-mobile
 npm ci
 npm run web -- --clear
