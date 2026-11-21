@@ -363,7 +363,7 @@ En los integrantes, tocar una persona abre `EmergenciaFichaScreen` («Persona N�
 integrantes, que se recargan). Sin confirmar se abre solo con el ingreso en curso; la ficha de una
 confirmada, también con la familia alojada (con el caso cerrado, en lectura).
 
-- Desde 1.2.24 la **persona 1** es el responsable que cargó el caso: sin confirmar, la lista y la
+- Desde 1.2.25 la **persona 1** es el responsable que cargó el caso: sin confirmar, la lista y la
   ficha la rotulan con su nombre («Benítez, Rosa (responsable)», `responsable` de §13.5) y la ficha
   llega precargada del back con parentesco «Jefe/a de hogar», DNI, nombre y apellido (Cambio 520
   de Chaco-Back). Con un back viejo se sigue viendo «Persona 1» vacía.
