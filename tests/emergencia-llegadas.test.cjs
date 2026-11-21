@@ -110,6 +110,24 @@ test('integrantes: normaliza, ordena por n, contador, crecimiento, lectura y cie
   igual(l.estadoDeIntegrante('EGRESADA'), {titulo: 'Egresada', tono: 'info'});
 });
 
+test('integrantes: la persona 1 sin confirmar se rotula con el responsable que cargó el caso (Cambio 520)', async () => {
+  const {l} = await preparar();
+  const responsable = {id: 9, nombre: 'Benítez, Rosa', dni: '30111222'};
+  const d = l.normalizarIntegrantes({...INTEGRANTES, integrantes: [FILA(1, {responsable}), FILA(2, {responsable: null}), FILA(3)]});
+  const [uno, dos, tres] = d.integrantes;
+  igual(uno.responsable, responsable);
+  igual([dos.responsable, tres.responsable], [null, null]);
+  igual(l.rotuloDeIntegrante(uno), {nombre: 'Benítez, Rosa (responsable)', dni: '30111222', esResponsable: true});
+  igual(l.rotuloDeIntegrante(dos), {nombre: 'Persona 2', dni: '', esResponsable: false});
+  // Confirmada, manda la persona del legajo.
+  const confirmada = l.normalizarIntegrantes(INTEGRANTES).integrantes[0];
+  igual(l.rotuloDeIntegrante({...confirmada, responsable}), {nombre: 'Benítez, Rosa', dni: '30111222', esResponsable: false});
+  // El detalle (§13.6) también lo trae, con la ficha precargada tal cual.
+  const ficha = {parentesco: {parentesco: 'JEFE'}, datos_personales: {dni: '30111222', nombre: 'Rosa', apellido: 'Benítez'}};
+  const persona = l.normalizarPersona({...FILA(1, {responsable}), ficha, secciones_incompletas: []});
+  igual([persona.responsable, persona.ficha], [responsable, ficha]);
+});
+
 test('clasificarErrorLlegada: cada respuesta del contrato, por status y code', async () => {
   const {l} = await preparar();
   const tipo = (error, opciones) => l.clasificarErrorLlegada(error, opciones).tipo;
