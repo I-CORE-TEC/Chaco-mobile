@@ -7,6 +7,7 @@ import { useToast } from '../context/ToastContext';
 import {
   TEXTO_SIN_RED, abrirSesion, agregarPersona, cargarIntegrantes, cierreDisponible, clasificarErrorLlegada, escucharRed,
   agregarPendiente, esSoloLectura, olvidarAgregarPendiente, estadoDeIntegrante, hayConexion, textoDeCrecimiento, textoDelContador,
+  rotuloDeIntegrante,
 } from '../services/emergenciaLlegadas';
 import { statusTones } from '../theme/statusBadges';
 import { fontSizes, radii } from '../theme';
@@ -233,9 +234,10 @@ export default function EmergenciaIntegrantesScreen({
 
   const fila = (integrante) => {
     const estado = estadoDeIntegrante(integrante.estado);
-    const titulo = integrante.persona?.nombre || `Persona ${integrante.n}`;
+    const rotulo = rotuloDeIntegrante(integrante);
+    const titulo = rotulo.nombre;
     const detalle = [
-      integrante.persona?.dni ? `DNI ${integrante.persona.dni}` : null,
+      rotulo.dni ? `DNI ${rotulo.dni}` : null,
       integrante.plaza ? `Cama ${integrante.plaza.nombre || integrante.plaza.codigo}` : null,
       integrante.parentesco || null,
     ].filter(Boolean).join(' · ');

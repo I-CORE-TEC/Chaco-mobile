@@ -181,20 +181,37 @@ export const estadoDeIntegrante = (estado) => {
   return { titulo, tono };
 };
 
+const personaDe = (valor) => (valor && typeof valor === 'object'
+  ? { id: valor.id ?? null, nombre: textoPlano(valor.nombre), dni: textoPlano(valor.dni) } : null);
+
 const normalizarIntegrante = (fila) => {
   if (!fila || typeof fila !== 'object' || fila.n == null) return null;
-  const persona = fila.persona && typeof fila.persona === 'object' ? fila.persona : null;
+  const responsable = personaDe(fila.responsable);
   const plaza = fila.plaza && typeof fila.plaza === 'object' ? fila.plaza : null;
   return {
     n: entero(fila.n),
     estado: textoPlano(fila.estado),
     ficha_completa: fila.ficha_completa === true,
-    persona: persona ? { id: persona.id ?? null, nombre: textoPlano(persona.nombre), dni: textoPlano(persona.dni) } : null,
+    persona: personaDe(fila.persona),
+    // Solo en la persona 1 (Cambio 520 del back): el responsable que cargó el caso, también sin confirmar.
+    // `null` en las demás y con un back viejo, que no lo manda.
+    responsable: responsable && (responsable.nombre || responsable.dni) ? responsable : null,
     plaza: plaza ? { id: plaza.id ?? null, codigo: textoPlano(plaza.codigo), nombre: textoPlano(plaza.nombre) } : null,
     parentesco: textoPlano(fila.parentesco),
     confirmada_en: fila.confirmada_en || null,
     egresado_en: fila.egresado_en || null,
   };
+};
+
+// Cómo se rotula una persona de la familia: la confirmada, con su nombre; la persona 1 sin confirmar,
+// con el responsable que cargó el caso; si no, «Persona N». `dni`: el de quien se muestra, o ''.
+export const rotuloDeIntegrante = (integrante) => {
+  if (integrante?.persona?.nombre) return { nombre: integrante.persona.nombre, dni: integrante.persona.dni || '', esResponsable: false };
+  const responsable = integrante?.responsable;
+  if (responsable?.nombre || responsable?.dni) {
+    return { nombre: `${responsable.nombre || `DNI ${responsable.dni}`} (responsable)`, dni: responsable.dni || '', esResponsable: true };
+  }
+  return { nombre: `Persona ${integrante?.n ?? ''}`.trim(), dni: '', esResponsable: false };
 };
 
 // §13.5 (también el cuerpo de aceptar, §13.3, que trae `integrantes`). `derivacion_id`: la derivación

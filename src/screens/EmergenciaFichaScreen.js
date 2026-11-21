@@ -9,7 +9,7 @@ import { useToast } from '../context/ToastContext';
 import {
   TEXTO_SIN_RED, abrirSesion, borrarBorradorFicha, camasElegibles, cargarCamas, cargarPersona, clasificarErrorLlegada,
   completarFicha, confirmarPendiente, confirmarPersona, escucharRed, estadoDeCama, estadoDeIntegrante, guardarBorradorFicha,
-  hayConexion, leerBorradorFicha, olvidarConfirmarPendiente, revisarCama, buscarCama, esSoloLectura, camaPorDefecto,
+  hayConexion, leerBorradorFicha, olvidarConfirmarPendiente, revisarCama, buscarCama, esSoloLectura, camaPorDefecto, rotuloDeIntegrante,
 } from '../services/emergenciaLlegadas';
 import {
   ESQUEMA_FICHA, MAXIMOS, NIVELES_EDUCATIVOS, PARENTESCOS, PREGUNTAS_CRITICAS, ROTULOS_SECCION, SECCIONES_OPCIONALES, SEXOS_FICHA,
@@ -603,7 +603,7 @@ export default function EmergenciaFichaScreen({
           {modo === 'completar' && faltan.length ? insignia('warning', 'Ficha incompleta', 'incompleta') : null}
           {modo === 'completar' && !faltan.length ? insignia('success', 'Ficha completa', 'completa') : null}
         </View>
-        {persona.persona ? <Text style={[styles.texto, { color: theme.colors.text, fontFamily: typography.bold }]}>{persona.persona.nombre}</Text> : null}
+        {persona.persona || persona.responsable ? <Text style={[styles.texto, { color: theme.colors.text, fontFamily: typography.bold }]}>{rotuloDeIntegrante(persona).nombre}</Text> : null}
         {modo === 'completar' ? (
           <Text style={ayuda}>{[persona.persona?.dni ? `DNI ${persona.persona.dni}` : null,
             persona.plaza ? `Cama ${persona.plaza.nombre || persona.plaza.codigo}` : null, persona.parentesco || null].filter(Boolean).join(' · ')}</Text>
