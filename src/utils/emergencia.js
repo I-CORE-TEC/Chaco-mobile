@@ -132,6 +132,63 @@ export const fechaValida = (valor) => {
   return fecha.getFullYear() === anio && fecha.getMonth() === mes - 1 && fecha.getDate() === dia;
 };
 
+// ---- Asistencia según quiénes ingresan ----
+// El bloque 3 muestra solo lo que puede corresponder al grupo: «Embarazo» con alguna mujer menor o
+// adulta, «Lactantes» con menores, «Mayores con dependencia» con mayores. Lo que no se puede descartar
+// se muestra: el responsable sin sexo cargado puede ser mujer y sin fecha de nacimiento puede ser mayor.
+// Un campo oculto conserva lo cargado en el borrador (si vuelve a aparecer, está como estaba), pero no
+// se valida y se envía en 0 / false.
+export const EDAD_MENOR = 18;
+export const EDAD_MAYOR = 60;
+
+// Años cumplidos a `hoy` con una fecha DD/MM/AAAA o AAAA-MM-DD; null si no hay una fecha válida.
+export const edadEn = (fecha, hoy = new Date()) => {
+  if (!fechaValida(fecha)) return null;
+  const [dia, mes, anio] = normalizeDateText(texto(fecha)).split('/').map(Number);
+  const edad = hoy.getFullYear() - anio - ((hoy.getMonth() + 1 < mes || (hoy.getMonth() + 1 === mes && hoy.getDate() < dia)) ? 1 : 0);
+  return edad >= 0 ? edad : null;
+};
+
+// Lo que se sabe del responsable cuando va aparte de los contadores. En lo guardado antes de
+// `responsable_aparte` ya está contado en las franjas: no se mira de nuevo.
+const responsableAparte = (datos = {}, hoy = new Date()) => {
+  if (datos.responsable_aparte !== true) return { puedeSerMayor: false, puedeEmbarazo: false };
+  const edad = edadEn(datos.fecha_nacimiento, hoy);
+  const mayor = edad != null && edad >= EDAD_MAYOR;
+  return {
+    puedeSerMayor: edad == null || mayor,
+    puedeEmbarazo: texto(datos.sexo).toUpperCase() !== 'M' && !mayor,
+  };
+};
+
+// { clave: true/false } para cada campo de ASISTENCIA y AVISOS.
+export const asistenciaVisible = (datos = {}, hoy = new Date()) => {
+  const responsable = responsableAparte(datos, hoy);
+  const visible = Object.fromEntries([...ASISTENCIA, ...AVISOS].map(({ clave }) => [clave, true]));
+  visible.mayores_dependientes = totalMayores(datos) > 0 || responsable.puedeSerMayor;
+  visible.lactantes = totalMenores(datos) > 0;
+  visible.embarazo = suma(datos, ['menores_f', 'adultos_f']) > 0 || responsable.puedeEmbarazo;
+  return visible;
+};
+
+// Hasta cuánto puede llegar cada contador de asistencia con el grupo cargado.
+export const topesAsistencia = (datos = {}, hoy = new Date()) => ({
+  dependientes: totalDeclarado(datos),
+  mayores_dependientes: totalMayores(datos) + (responsableAparte(datos, hoy).puedeSerMayor ? 1 : 0),
+  lactantes: totalMenores(datos),
+});
+
+const POR_QUE_OCULTO = {
+  embarazo: 'Embarazo aparece si ingresa alguna mujer menor o adulta.',
+  lactantes: 'Lactantes aparece si ingresan menores.',
+  mayores_dependientes: 'Mayores con dependencia aparece si ingresan mayores.',
+};
+// Para quien carga: por qué no ve un campo. null si se ven todos.
+export const textoDeOcultos = (visible = {}) => {
+  const partes = Object.keys(POR_QUE_OCULTO).filter((clave) => visible[clave] === false).map((clave) => POR_QUE_OCULTO[clave]);
+  return partes.length ? partes.join(' ') : null;
+};
+
 // La consulta de identidad solo necesita DNI y sexo (§4).
 export const validarConsulta = ({ dni, sexo } = {}) => {
   const errores = {};
@@ -174,12 +231,15 @@ export const validarCaso = (datos = {}) => {
 
   const total = totalDeclarado(datos);
   if (total < 1) agregar('total', 'Cargá al menos una persona: el responsable también cuenta.');
-  if (aCantidad(datos.dependientes) > total) agregar('dependientes', 'No puede haber más personas con dependencia que personas.');
-  // El responsable que va aparte puede ser ese mayor: no tiene franja en los contadores.
-  if (aCantidad(datos.mayores_dependientes) > totalMayores(datos) + (datos.responsable_aparte === true ? 1 : 0)) {
+  // Lo oculto no se valida: se envía en 0. El responsable que va aparte puede ser el mayor con
+  // dependencia (no tiene franja en los contadores), salvo que su fecha de nacimiento diga que no.
+  const visible = asistenciaVisible(datos);
+  const topes = topesAsistencia(datos);
+  if (aCantidad(datos.dependientes) > topes.dependientes) agregar('dependientes', 'No puede haber más personas con dependencia que personas.');
+  if (visible.mayores_dependientes && aCantidad(datos.mayores_dependientes) > topes.mayores_dependientes) {
     agregar('mayores_dependientes', 'No puede haber más mayores con dependencia que mayores.');
   }
-  if (aCantidad(datos.lactantes) > totalMenores(datos)) agregar('lactantes', 'No puede haber más lactantes que menores.');
+  if (visible.lactantes && aCantidad(datos.lactantes) > topes.lactantes) agregar('lactantes', 'No puede haber más lactantes que menores.');
 
   const direccion = texto(datos.direccion);
   if (!direccion) agregar('direccion', 'Escribí la dirección o una referencia: es el mínimo para ubicar a la familia.');
@@ -217,8 +277,11 @@ export const datosDelCaso = (datos = {}) => {
     localidad: datos.localidad ?? null,
     observaciones: texto(datos.observaciones),
   };
-  [...CANTIDADES, ...ASISTENCIA].forEach(({ clave }) => { caso[clave] = aCantidad(datos[clave]); });
-  AVISOS.forEach(({ clave }) => { caso[clave] = datos[clave] === true; });
+  // Lo que el grupo no permite (oculto en la pantalla) va en 0 / false aunque el borrador lo conserve.
+  const visible = asistenciaVisible(datos);
+  CANTIDADES.forEach(({ clave }) => { caso[clave] = aCantidad(datos[clave]); });
+  ASISTENCIA.forEach(({ clave }) => { caso[clave] = visible[clave] ? aCantidad(datos[clave]) : 0; });
+  AVISOS.forEach(({ clave }) => { caso[clave] = visible[clave] && datos[clave] === true; });
   if (datos.latitud != null && datos.longitud != null && datos.latitud !== '' && datos.longitud !== '') {
     caso.latitud = datos.latitud;
     caso.longitud = datos.longitud;

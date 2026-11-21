@@ -242,6 +242,35 @@ test('Formulario 1: consulta, contadores, localidad, GPS, foto y envío con la h
   } finally { await ui.close(); }
 });
 
+test('Formulario 1: «Quiénes necesitan asistencia» muestra solo lo que el grupo puede tener, con topes', async () => {
+  const ui = await montarFormulario({borrador: {datos: {...COMPLETO, sexo: 'M', fecha_nacimiento: '10/05/1990', adultos_f: 0, adultos_m: 1,
+    embarazo: true}}});
+  try {
+    // Todos varones adultos: ni embarazo, ni lactantes, ni mayores con dependencia.
+    for (const oculto of ['Embarazo', 'Sumar Lactantes', 'Sumar Mayores con dependencia']) assert.equal(ui.porLabel(oculto).length, 0, oculto);
+    for (const visible of ['Sumar Personas con dependencia', 'Electrodependiente', 'Medicación crítica', 'Mascotas']) {
+      assert.ok(ui.porLabel(visible).length, visible);
+    }
+    assert.ok(ui.labels().some((l) => l.includes('Embarazo aparece si ingresa alguna mujer menor o adulta.')));
+    // Con un menor aparece «Lactantes», y no deja sumar más lactantes que menores.
+    await ui.press('Sumar Menores · Varones');
+    await ui.press('Sumar Lactantes');
+    const sumarLactantes = ui.porLabel('Sumar Lactantes').find((n) => n.type === 'Pressable');
+    assert.equal(sumarLactantes.props.disabled, true);
+    assert.equal(ui.porLabel('Lactantes: 1').length, 1);
+    // Con una menor aparece «Embarazo» con lo que el borrador conservaba.
+    await ui.press('Sumar Menores · Mujeres');
+    assert.equal(ui.porLabel('Embarazo')[0].props.accessibilityState.checked, true);
+    // Se saca a la menor: se oculta de nuevo y no viaja.
+    await ui.press('Restar Menores · Mujeres');
+    assert.equal(ui.porLabel('Embarazo').length, 0);
+    await ui.pressButton('Enviar');
+    const [, {datos}] = ui.cola.calls.encolados[0];
+    assert.equal(ui.emergencia.datosDelCaso(datos).embarazo, false);
+    assert.equal(ui.emergencia.datosDelCaso(datos).lactantes, 1);
+  } finally { await ui.close(); }
+});
+
 test('Formulario 1: persona que no figura o sin red pide nombre y apellido; cambiar el DNI anula la consulta', async () => {
   let respuesta = () => { throw Object.assign(new Error('No figura'), {status: 404, payload: {success: false}}); };
   const ui = await montarFormulario({consultar: () => respuesta()});

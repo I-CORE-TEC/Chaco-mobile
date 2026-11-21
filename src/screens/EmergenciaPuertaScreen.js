@@ -12,7 +12,7 @@ import {
 } from '../services/emergenciaLlegadas';
 import { cleanDigits } from '../utils/dni';
 import {
-  ASISTENCIA, AVISOS, CANTIDADES, MAX_DIRECCION, MAX_TRASLADO_OTRO, TRASLADOS, aCantidad, listaDeErrores, totalDeclarado,
+  ASISTENCIA, AVISOS, CANTIDADES, MAX_DIRECCION, MAX_TRASLADO_OTRO, TRASLADOS, aCantidad, asistenciaVisible, listaDeErrores, textoDeOcultos, topesAsistencia, totalDeclarado,
 } from '../utils/emergencia';
 import { statusTones } from '../theme/statusBadges';
 import { keyboardDismissModeFor } from '../utils/teclado';
@@ -284,8 +284,10 @@ export default function EmergenciaPuertaScreen({
   ));
   const caja = (campos, extra = []) => [styles.input, ...extra, { color: theme.colors.text, backgroundColor: theme.colors.surface,
     borderColor: campos.some((c) => errores[c]?.length) ? theme.colors.danger : theme.colors.border }];
-  const contador = ({ clave, titulo }) => {
+  // `tope`: hasta dónde deja sumar (lactantes ≤ menores, etc.); sin tope, sin límite.
+  const contador = ({ clave, titulo, tope = Infinity }) => {
     const valor = aCantidad(datos[clave]);
+    const sinSumar = fijo || valor >= tope;
     return (
       <View key={clave} style={styles.contador}>
         <Text style={[styles.flex, etiqueta]}>{titulo}</Text>
@@ -295,8 +297,8 @@ export default function EmergenciaPuertaScreen({
           <Ionicons name="remove" size={20} color={theme.colors.text} accessible={false} importantForAccessibility="no" />
         </Pressable>
         <Text accessibilityLabel={`${titulo}: ${valor}`} style={[styles.valor, { color: theme.colors.text, fontFamily: typography.bold }]}>{valor}</Text>
-        <Pressable accessibilityRole="button" accessibilityLabel={`Sumar ${titulo}`} disabled={fijo} accessibilityState={{ disabled: fijo }}
-          onPress={() => cambiar({ [clave]: valor + 1 })} style={[styles.paso, { borderColor: theme.colors.border, opacity: fijo ? 0.4 : 1 }]}>
+        <Pressable accessibilityRole="button" accessibilityLabel={`Sumar ${titulo}`} disabled={sinSumar} accessibilityState={{ disabled: sinSumar }}
+          onPress={() => cambiar({ [clave]: valor + 1 })} style={[styles.paso, { borderColor: theme.colors.border, opacity: sinSumar ? 0.4 : 1 }]}>
           <Ionicons name="add" size={20} color={theme.colors.text} accessible={false} importantForAccessibility="no" />
         </Pressable>
       </View>
@@ -315,6 +317,9 @@ export default function EmergenciaPuertaScreen({
   };
 
   const total = totalDeclarado(datos);
+  const visible = asistenciaVisible(datos);
+  const topes = topesAsistencia(datos);
+  const ocultos = textoDeOcultos(visible);
   const puedeIngresar = !sinCamas || pendiente === 'ingresar';
   const segundos = Math.max(1, Math.ceil((esperaHasta - ahora) / 1000));
   const listado = intentado ? listaDeErrores(errores) : [];
@@ -405,13 +410,14 @@ export default function EmergenciaPuertaScreen({
 
       <View style={tarjeta}>
         <Text accessibilityRole="header" style={tituloSeccion}>3. Quiénes necesitan asistencia</Text>
-        {ASISTENCIA.map((c) => (
+        {ASISTENCIA.filter((c) => visible[c.clave]).map((c) => (
           <View key={c.clave}>
-            {contador(c)}
+            {contador({ ...c, tope: topes[c.clave] })}
             {errorCampo([c.clave])}
           </View>
         ))}
-        {AVISOS.map((c) => casilla(c))}
+        {AVISOS.filter((c) => visible[c.clave]).map((c) => casilla(c))}
+        {ocultos ? <Text style={ayuda}>{ocultos}</Text> : null}
       </View>
 
       <View style={tarjeta}>
