@@ -56,7 +56,7 @@ async function render(Screen, props) {
     await renderer.act(async () => { await nodo.props.onPress(); await esperar(5); });
   };
   const button = title => tree.root.findAllByType('CustomButton').find(node => node.props.title === title);
-  const titulos = () => tree.root.findAllByType('CustomButton').map(b => b.props.title);
+  const titulos = () => tree.root.findAllByType('CustomButton').map(b => b.props.title).filter(t => t !== 'Buscar persona');
   const pressButton = async (title) => {
     const found = button(title);
     assert.ok(found, 'Missing CustomButton ' + title + ' — hay: ' + titulos());
@@ -95,9 +95,16 @@ async function entorno(rutas) {
   runtime.setFetch(async () => response(200, {token: 'tok', user_id: 7, username: 'guardia', modulos: ['emergencia']}));
   await runtime.api.loginBecas({username: 'guardia', password: 'x'});
   const calls = [];
+  // La consulta de la persona (autoconsulta de la puerta) va aparte: no cuenta en `calls`.
+  const consultas = [];
+  let consulta = () => response(404, {success: false, no_en_legajo: true, error: 'No figura en los legajos de DATAÑACH.'});
   runtime.setFetch(async (url, init = {}) => {
     const call = {url: String(url).replace('https://example.test', ''), method: init.method || 'GET', init,
       body: typeof init.body === 'string' ? JSON.parse(init.body) : init.body};
+    if (call.url === '/api/emergencia/personas/consultar/') {
+      consultas.push(call);
+      return consulta(call);
+    }
     calls.push(call);
     return rutas(call, calls);
   });
@@ -117,13 +124,15 @@ async function entorno(rutas) {
     '../utils/dni': runtime.load('../utils/dni'),
     '../utils/emergencia': runtime.load('../utils/emergencia'),
     '../services/emergenciaLlegadas': llegadas,
+    '../services/emergenciaApi': runtime.load('./emergenciaApi'),
+    '../services/identityLookup': runtime.load('./identityLookup'),
   };
   const aceptarAlerta = async (texto) => {
     const opcion = alerts.at(-1)[2].find(o => o.text === texto);
     assert.ok(opcion, 'Falta la opción ' + texto + ' — hay: ' + alerts.at(-1)[2].map(o => o.text));
     await renderer.act(async () => { await opcion.onPress(); await esperar(5); });
   };
-  return {runtime, calls, toasts, alerts, llegadas, mocks, aceptarAlerta};
+  return {runtime, calls, consultas, setConsulta: (fn) => { consulta = fn; }, toasts, alerts, llegadas, mocks, aceptarAlerta};
 }
 const fondoDe = (tree, contenido) => {
   const nodo = tree.root.findAllByType('Text').find(n => text(n) === contenido);
@@ -331,8 +340,9 @@ test('Cierre: la respuesta que llega después de salir llega igual al padre y no
 
 // ---- Sin derivación ----
 
-async function montarPuerta(rutas, {plazasLibres = 2, accion = 'ingresar', online = true, env: previo} = {}) {
+async function montarPuerta(rutas, {plazasLibres = 2, accion = 'ingresar', online = true, env: previo, consulta} = {}) {
   const env = previo || await entorno(rutas);
+  if (consulta) env.setConsulta(consulta);
   env.runtime.setOnline(online);
   const eventos = [];
   const enviando = [];
@@ -842,4 +852,114 @@ test('EmergenciaApp M2-6: buscar sin derivación -> puerta (con DNI, camas y men
     await ui.hacer(() => ui.pantallas.puerta.onNoEncontrado());
     assert.equal(ui.vista(), 'dispositivos');
   } finally { await ui.close(); }
+});
+
+// ---- Sin derivación: autoconsulta por DNI ----
+
+const LEGAJO = {success: true, origen: 'legajo', data: {nombre: 'Rosa', apellido: 'Benitez', fecha_nacimiento: '1984-03-02', localidad_id: 1,
+  localidad_texto: 'Resistencia', dni: '30111222', sexo: 'F'}};
+const lleno = ui => ({nombre: ui.input('Nombre').props.value, apellido: ui.input('Apellido').props.value});
+const sinRespuesta = {success: false, no_en_legajo: true, error: 'No figura en los legajos de DATAÑACH.'};
+
+test('Puerta (autoconsulta): al abrir busca solo por DNI (sin sexo) en legajos, completa lo vacío y deja todo editable', async () => {
+  const ui = await montarPuerta(() => response(201, INGRESO), {consulta: () => response(200, LEGAJO)});
+  try {
+    assert.equal(ui.consultas.length, 1);
+    assert.deepEqual(plano(ui.consultas[0].body), {dni: '30111222'}, 'sin sexo en el cuerpo');
+    assert.deepEqual(lleno(ui), {nombre: 'Rosa', apellido: 'Benitez'});
+    assert.equal(ui.tree.root.findAllByType('FechaInput')[0].props.value, '02/03/1984');
+    assert.equal(ui.input('Nombre').props.editable, true);
+    assert.ok(ui.labels().includes('Encontramos a Rosa Benitez en los legajos de DATAÑACH.'));
+    assert.equal(ui.pressables().find(n => n.props.accessibilityLabel === 'Sexo: Femenino').props.accessibilityState.selected, true, 'preselecciona el sexo del legajo');
+    assert.equal(ui.labels().includes('Buscando en los legajos…'), false);
+  } finally { await ui.close(); }
+});
+
+test('Puerta (autoconsulta): lo que el usuario tipeó mientras tanto no se pisa', async () => {
+  let soltar;
+  const ui = await montarPuerta(() => response(201, INGRESO), {consulta: () => new Promise(resolve => { soltar = () => resolve(response(200, LEGAJO)); })});
+  try {
+    assert.ok(ui.labels().includes('Buscando en los legajos…'), 'indicador mientras corre');
+    await ui.escribir('Nombre', 'Marta');
+    await renderer.act(async () => { soltar(); await esperar(10); });
+    assert.deepEqual(lleno(ui), {nombre: 'Marta', apellido: ''});
+    assert.equal(ui.labels().some(t => t.startsWith('Encontramos')), false);
+    assert.equal(ui.labels().includes('Buscando en los legajos…'), false);
+  } finally { await ui.close(); }
+});
+
+test('Puerta (autoconsulta): 404 no_en_legajo avisa y deja el formulario manual', async () => {
+  const ui = await montarPuerta(() => response(201, INGRESO));
+  try {
+    assert.equal(ui.consultas.length, 1);
+    assert.ok(ui.labels().includes('No figura en los legajos de DATAÑACH: cargá nombre y apellido. Si elegís el sexo, la buscamos también en la Base de Personas.'));
+    assert.deepEqual(lleno(ui), {nombre: '', apellido: ''});
+    assert.equal(ui.input('Nombre').props.editable, true);
+  } finally { await ui.close(); }
+});
+
+test('Puerta (autoconsulta): el 400 del back viejo y la falta de red no muestran error', async () => {
+  const viejo = await montarPuerta(() => response(201, INGRESO), {consulta: () => response(400, {error: 'DNI y sexo (F o M) son requeridos.'})});
+  try {
+    assert.equal(viejo.consultas.length, 1);
+    assert.equal(viejo.labels().some(t => t.includes('requeridos') || t.includes('No figura') || t.includes('Encontramos')), false);
+    assert.equal(viejo.tree.root.findAllByProps({accessibilityRole: 'alert'}).length, 1, 'solo el aviso de la puerta');
+    assert.equal(viejo.input('Nombre').props.editable, true);
+  } finally { await viejo.close(); }
+  const caida = await montarPuerta(() => response(201, INGRESO), {consulta: fallaDeRed});
+  try {
+    assert.equal(caida.tree.root.findAllByProps({accessibilityRole: 'alert'}).length, 1, 'solo el aviso de la puerta');
+  } finally { await caida.close(); }
+  const sinRed = await montarPuerta(() => response(201, INGRESO), {online: false});
+  try {
+    assert.equal(sinRed.consultas.length, 0, 'sin red no consulta');
+  } finally { await sinRed.close(); }
+});
+
+test('Puerta (autoconsulta): elegir sexo hace la consulta completa {dni, sexo} y completa; «Buscar persona» reintenta; fallecida avisa', async () => {
+  let respuesta = () => response(404, sinRespuesta);
+  const ui = await montarPuerta(() => response(201, INGRESO), {consulta: () => respuesta()});
+  try {
+    assert.equal(ui.consultas.length, 1);
+    respuesta = () => response(200, {success: true, origen: 'personas', data: {nombre: 'Ana', apellido: 'Gomez', fecha_nacimiento: '1990-01-05'}});
+    await ui.press('Sexo: Femenino');
+    assert.equal(ui.consultas.length, 2);
+    assert.deepEqual(plano(ui.consultas[1].body), {dni: '30111222', sexo: 'F'});
+    assert.deepEqual(lleno(ui), {nombre: 'Ana', apellido: 'Gomez'});
+    assert.ok(ui.labels().includes('Encontramos a Ana Gomez en la Base de Personas.'));
+    // Ya encontrada: elegir otro sexo no vuelve a consultar.
+    await ui.press('Sexo: Masculino');
+    assert.equal(ui.consultas.length, 2);
+  } finally { await ui.close(); }
+  respuesta = () => response(404, {success: false, fallecido: true, error: 'Fallecida.'});
+  const otra = await montarPuerta(() => response(201, INGRESO), {consulta: () => respuesta()});
+  try {
+    await otra.press('Sexo: Femenino');
+    assert.ok(otra.labels().includes('La persona figura como fallecida en la Base de Personas. Revisá el DNI.'));
+    respuesta = () => response(404, {success: false, error: 'No figura.'});
+    await otra.pressButton('Buscar persona');
+    assert.equal(otra.consultas.length, 3);
+    assert.deepEqual(plano(otra.consultas[2].body), {dni: '30111222', sexo: 'F'});
+    assert.ok(otra.labels().includes('No figura en la Base de Personas ni en los legajos de DATAÑACH: cargá nombre y apellido para darla de alta.'));
+  } finally { await otra.close(); }
+});
+
+test('Puerta (autoconsulta): con un envío pendiente no consulta ni modifica nada', async () => {
+  const env = await entorno(() => fallaDeRed());
+  const primera = await montarPuerta(null, {env});
+  await primera.llenar();
+  await primera.escribir('Nombre', 'Rosa');
+  await primera.pressButton('Ingresar igual');
+  await primera.aceptarAlerta('Ingresar igual');
+  await primera.close();
+  const antes = env.consultas.length;
+  env.setConsulta(() => response(200, LEGAJO));
+  const segunda = await montarPuerta(null, {env});
+  try {
+    assert.equal(env.consultas.length, antes, 'no consulta al abrir con pendiente');
+    assert.equal(segunda.input('Nombre').props.value, 'Rosa');
+    await segunda.pressButton('Buscar persona');
+    assert.equal(env.consultas.length, antes, 'tampoco a mano');
+    assert.equal(segunda.input('Nombre').props.value, 'Rosa');
+  } finally { await segunda.close(); }
 });

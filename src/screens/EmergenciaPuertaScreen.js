@@ -10,7 +10,9 @@ import {
   TEXTO_SIN_RED, abrirSesion, clasificarErrorLlegada, datosDeLaPuerta, enviarPuerta, escucharRed, hayConexion,
   puertaPendiente, reintentarPuertaSinDatos, validarPuerta,
 } from '../services/emergenciaLlegadas';
-import { cleanDigits } from '../utils/dni';
+import { consultarPersona } from '../services/emergenciaApi';
+import { DECEASED_MESSAGE, identityFailure } from '../services/identityLookup';
+import { cleanDigits, normalizeDateText } from '../utils/dni';
 import {
   ASISTENCIA, AVISOS, CANTIDADES, MAX_DIRECCION, MAX_TRASLADO_OTRO, SEXOS, TRASLADOS, aCantidad, asistenciaVisible, listaDeErrores, textoDeOcultos, topesAsistencia, totalDeclarado,
 } from '../utils/emergencia';
@@ -20,6 +22,10 @@ import { fontSizes, radii } from '../theme';
 
 export const TEXTO_UUID_EN_USO_PUERTA = 'Este envío no se pudo mandar: su identificador ya se usó en otro caso. Volvé a tocar el botón: sale con uno nuevo.';
 export const TEXTO_SIN_DATOS = 'Hay un envío de esta familia sin resultado, pero lo cargado ya se borró del teléfono (se cerró la sesión o pasaron 48 h). «Reintentar» manda solo su identificador: si había llegado, se recupera el caso; si no, vas a tener que cargar los datos de nuevo.';
+export const TEXTO_NO_EN_LEGAJO = 'No figura en los legajos de DATAÑACH: cargá nombre y apellido. Si elegís el sexo, la buscamos también en la Base de Personas.';
+export const TEXTO_NO_ENCONTRADA_PUERTA = 'No figura en la Base de Personas ni en los legajos de DATAÑACH: cargá nombre y apellido para darla de alta.';
+export const TEXTO_SIN_RED_CONSULTA_PUERTA = 'Sin conexión: no se pudo buscar a la persona. Cargá nombre y apellido.';
+export const TEXTO_AYUDA_PERSONA = 'Al abrir buscamos el DNI en los legajos de DATAÑACH y completamos lo que figure (se puede corregir). Si no figura, elegí el sexo para buscarla también en la Base de Personas, o cargá nombre y apellido: el servidor los pide para darla de alta.';
 export const TEXTO_DNI_FIJO = 'Es el DNI que buscaste. Para otra persona, volvé y buscá de nuevo.';
 const ESTADOS_TRAS_INGRESO = {
   ALOJADO: 'la familia ya figura alojada',
@@ -77,9 +83,17 @@ export default function EmergenciaPuertaScreen({
   const [erroresServidor, setErroresServidor] = useState({});
   const [esperaHasta, setEsperaHasta] = useState(0);
   const [ahora, setAhora] = useState(Date.now());
+  const [consultando, setConsultando] = useState('');
+  const [avisoConsulta, setAvisoConsulta] = useState(null);
   const montado = useRef(true);
   const enviandoRef = useRef(false);
   const sesionRef = useRef(null);
+  const datosRef = useRef(null);
+  const fijoRef = useRef(false);
+  const consultaEnCurso = useRef(0);
+  const encontradaRef = useRef(false);
+  const consultarRef = useRef(null);
+  datosRef.current = datos;
 
   useEffect(() => {
     montado.current = true;
@@ -91,7 +105,14 @@ export default function EmergenciaPuertaScreen({
         setSesion(abierta);
         // Un envío de esta familia que quedó sin resultado: se recupera tal cual y solo se ofrece reintentarlo.
         const previo = await puertaPendiente(abierta, dispositivo?.id, dni).catch(() => null);
-        if (!montado.current || !previo) return;
+        if (!montado.current) return;
+        if (!previo) {
+          // Sin envío pendiente: se busca solo por DNI en los legajos (sin sexo no hay Base de Personas).
+          if (!String(datosRef.current?.nombre || '').trim() && !String(datosRef.current?.apellido || '').trim()) {
+            consultarRef.current?.({ automatica: true });
+          }
+          return;
+        }
         setPendiente(previo.accion);
         setAccion(previo.accion);
         if (previo.datos) setDatos({ ...datosDeLaPuerta(dni), responsable_aparte: false, ...previo.datos, dni: cleanDigits(dni) });
@@ -106,6 +127,7 @@ export default function EmergenciaPuertaScreen({
     const dejarDeEscuchar = escucharRed((hay) => { if (montado.current) setSinRed(!hay); });
     return () => {
       montado.current = false;
+      consultaEnCurso.current += 1;
       dejarDeEscuchar();
     };
   }, [dispositivo?.id, dni]);
@@ -126,6 +148,7 @@ export default function EmergenciaPuertaScreen({
   };
 
   const fijo = enviando || !!pendiente;
+  fijoRef.current = fijo;
   const cambiar = (cambios) => {
     if (fijo) return;
     setDatos((prev) => ({ ...prev, ...cambios }));
@@ -138,6 +161,67 @@ export default function EmergenciaPuertaScreen({
       if (tocaTotal) delete next.total;
       return next;
     });
+  };
+
+  // Busca a la persona del DNI fijo. Sin `sexo`: solo legajos, y todo fallo es silencioso (el formulario
+  // sigue a mano). Con `sexo` F/M: legajos y Base de Personas, como en el Formulario 1. Solo completa
+  // si nombre y apellido siguen vacíos (lo tipeado no se pisa) y no toca nada con un envío en curso o pendiente.
+  const consultar = async ({ automatica = false, sexo: sexoElegido } = {}) => {
+    if (fijoRef.current || enviandoRef.current || !sesionRef.current) return;
+    const sexo = String(sexoElegido ?? datosRef.current?.sexo ?? '').toUpperCase();
+    const conSexo = sexo === 'F' || sexo === 'M';
+    if (!await hayConexion()) {
+      if (montado.current && !automatica) setAvisoConsulta({ tono: 'warning', texto: TEXTO_SIN_RED_CONSULTA_PUERTA });
+      return;
+    }
+    if (!montado.current || fijoRef.current) return;
+    consultaEnCurso.current += 1;
+    const pedido = consultaEnCurso.current;
+    const numeroDni = cleanDigits(dni);
+    const vigente = () => montado.current && consultaEnCurso.current === pedido && !fijoRef.current;
+    setConsultando(conSexo ? 'persona' : 'legajos');
+    setAvisoConsulta(null);
+    try {
+      const respuesta = await consultarPersona(conSexo ? { dni: numeroDni, sexo } : { dni: numeroDni });
+      if (!vigente()) return;
+      const persona = respuesta?.data || {};
+      const actual = datosRef.current || {};
+      if (String(actual.nombre || '').trim() || String(actual.apellido || '').trim()) return;
+      encontradaRef.current = true;
+      const sexoPersona = String(persona.sexo || '').toUpperCase();
+      setDatos((prev) => ({
+        ...prev,
+        nombre: persona.nombre || prev.nombre,
+        apellido: persona.apellido || prev.apellido,
+        fecha_nacimiento: !prev.fecha_nacimiento && persona.fecha_nacimiento ? normalizeDateText(persona.fecha_nacimiento) : prev.fecha_nacimiento,
+        sexo: !prev.sexo && (sexoPersona === 'F' || sexoPersona === 'M') ? sexoPersona : prev.sexo,
+      }));
+      setErroresServidor((prev) => {
+        if (!prev.nombre && !prev.apellido && !prev.fecha_nacimiento) return prev;
+        const { nombre: _n, apellido: _a, fecha_nacimiento: _f, ...resto } = prev;
+        return resto;
+      });
+      const quien = [persona.nombre, persona.apellido].filter(Boolean).join(' ');
+      setAvisoConsulta({ tono: 'success', texto: `Encontramos a ${quien} ${respuesta?.origen === 'legajo' ? 'en los legajos de DATAÑACH' : 'en la Base de Personas'}.` });
+    } catch (e) {
+      if (!vigente()) return;
+      const status = Number(e?.status);
+      if (status === 404 && e?.payload?.fallecido === true) {
+        setAvisoConsulta({ tono: 'danger', texto: `${DECEASED_MESSAGE}. Revisá el DNI.` });
+      } else if (status === 404) {
+        setAvisoConsulta({ tono: 'warning', texto: conSexo ? TEXTO_NO_ENCONTRADA_PUERTA : TEXTO_NO_EN_LEGAJO });
+      } else if (!automatica) {
+        setAvisoConsulta({ tono: 'warning', texto: e?.network ? TEXTO_SIN_RED_CONSULTA_PUERTA : identityFailure(e).message });
+      }
+    } finally {
+      if (montado.current && consultaEnCurso.current === pedido) setConsultando('');
+    }
+  };
+  consultarRef.current = consultar;
+
+  const elegirSexo = (valor, elegida) => {
+    cambiar({ sexo: elegida ? '' : valor });
+    if (!elegida && !encontradaRef.current) consultar({ sexo: valor });
   };
 
   const mandar = async (cual) => {
@@ -388,7 +472,7 @@ export default function EmergenciaPuertaScreen({
             const elegida = datos.sexo === opcion.valor;
             return (
               <Pressable key={opcion.valor} accessibilityRole="radio" accessibilityState={{ selected: elegida, checked: elegida, disabled: fijo }}
-                accessibilityLabel={`Sexo: ${opcion.titulo}`} disabled={fijo} onPress={() => cambiar({ sexo: elegida ? '' : opcion.valor })}
+                accessibilityLabel={`Sexo: ${opcion.titulo}`} disabled={fijo} onPress={() => elegirSexo(opcion.valor, elegida)}
                 style={[styles.opcion, { borderColor: elegida ? theme.colors.primary : theme.colors.border,
                   backgroundColor: elegida ? `${theme.colors.primary}18` : theme.colors.surface }]}>
                 <Text style={{ color: elegida ? theme.colors.primary : theme.colors.text, fontFamily: elegida ? typography.bold : typography.medium, fontSize: fontSizes.sm }}>{opcion.titulo}</Text>
@@ -396,6 +480,17 @@ export default function EmergenciaPuertaScreen({
             );
           })}
         </View>
+        <CustomButton title="Buscar persona" variant="secondary" iconLeft="search-outline" disabled={fijo || !!consultando || !sesion}
+          onPress={() => consultar()} />
+        {consultando ? (
+          <View style={styles.buscando}>
+            <ActivityIndicator color={theme.colors.primary} accessibilityLabel="Buscando a la persona" />
+            <Text style={[styles.texto, { color: theme.colors.textMuted, fontFamily: typography.medium }]}>
+              {consultando === 'legajos' ? 'Buscando en los legajos…' : 'Buscando a la persona…'}
+            </Text>
+          </View>
+        ) : null}
+        {avisoConsulta ? avisoDe(avisoConsulta.tono, avisoConsulta.texto) : null}
         <Text style={etiqueta}>Nombre</Text>
         <TextInput value={datos.nombre} editable={!fijo} onChangeText={(t) => cambiar({ nombre: t })} autoCapitalize="words"
           accessibilityLabel="Nombre" placeholderTextColor={theme.colors.textSoft} style={caja(['nombre'])} />
@@ -404,7 +499,7 @@ export default function EmergenciaPuertaScreen({
         <TextInput value={datos.apellido} editable={!fijo} onChangeText={(t) => cambiar({ apellido: t })} autoCapitalize="words"
           accessibilityLabel="Apellido" placeholderTextColor={theme.colors.textSoft} style={caja(['apellido'])} />
         {errorCampo(['apellido'])}
-        <Text style={ayuda}>Si la persona ya está en el legajo alcanza con el DNI; si no, el servidor pide nombre y apellido para darla de alta.</Text>
+        <Text style={ayuda}>{TEXTO_AYUDA_PERSONA}</Text>
         <FechaInput label="Fecha de nacimiento" value={datos.fecha_nacimiento} disabled={fijo} onSelect={(t) => cambiar({ fecha_nacimiento: t })} />
         {errorCampo(['fecha_nacimiento'])}
         <Text style={etiqueta}>Teléfono de contacto</Text>
@@ -487,5 +582,6 @@ const styles = StyleSheet.create({
   paso: { width: 44, height: 44, borderWidth: 1, borderRadius: radii.full, alignItems: 'center', justifyContent: 'center' },
   valor: { minWidth: 28, textAlign: 'center', fontSize: fontSizes.base },
   casilla: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 44 },
+  buscando: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   aviso: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: radii.lg, padding: 10 },
 });
