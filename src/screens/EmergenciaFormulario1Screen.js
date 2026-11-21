@@ -515,6 +515,7 @@ export default function EmergenciaFormulario1Screen({ uuid = null, onTerminar })
           accessibilityLabel="Apellido" placeholderTextColor={theme.colors.textSoft} style={caja(['apellido'])} />
         {errorCampo(['apellido'])}
         {!confirmada ? <Text style={ayuda}>Si la persona no está en el legajo, con esto se la da de alta.</Text> : null}
+        <Text style={etiqueta}>Fecha de nacimiento</Text>
         <FechaInput label="Fecha de nacimiento" value={datos.fecha_nacimiento} onSelect={(texto) => cambiar({ fecha_nacimiento: texto })} />
         {errorCampo(['fecha_nacimiento'])}
         <Text style={etiqueta}>Teléfono de contacto</Text>
@@ -663,7 +664,8 @@ const styles = StyleSheet.create({
   input: { minHeight: 46, borderWidth: 1, borderRadius: radii.lg, paddingHorizontal: 12, paddingVertical: 10, fontSize: fontSizes.sm },
   areaTexto: { minHeight: 96, textAlignVertical: 'top' },
   fila: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  flex: { flex: 1 },
+  // minWidth 0: en web el input no se achica por debajo de su ancho propio y empuja al botón de al lado.
+  flex: { flex: 1, minWidth: 0 },
   opciones: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   opcion: { minHeight: 44, paddingHorizontal: 12, borderWidth: 1, borderRadius: radii.lg, alignItems: 'center', justifyContent: 'center' },
   contador: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 48 },
