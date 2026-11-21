@@ -237,7 +237,7 @@ fotos (dirección, localidad, GPS opcional y hasta dos fotos JPEG). Funciona sin
   suma uno al total y el envío lleva `responsable_aparte: true`. Lo guardado antes en el
   teléfono (borrador, cola o puerta) no tiene la marca y se lee como entonces, con el
   responsable adentro (`conDatosGuardados`), así no se cuenta dos veces.
-- «Quiénes necesitan asistencia» sigue al grupo (`asistenciaVisible`, en el Formulario 1 y en
+- Desde 1.2.24 «Quiénes necesitan asistencia» sigue al grupo (`asistenciaVisible`, en el Formulario 1 y en
   la puerta): «Embarazo» solo con alguna mujer menor o adulta (o la responsable, si no es
   mayor), «Lactantes» solo con menores y «Mayores con dependencia» solo con mayores (o si el
   responsable es mayor o no tiene fecha de nacimiento). Sin sexo cargado (la puerta no lo
