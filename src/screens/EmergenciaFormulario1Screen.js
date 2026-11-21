@@ -515,7 +515,6 @@ export default function EmergenciaFormulario1Screen({ uuid = null, onTerminar })
           accessibilityLabel="Apellido" placeholderTextColor={theme.colors.textSoft} style={caja(['apellido'])} />
         {errorCampo(['apellido'])}
         {!confirmada ? <Text style={ayuda}>Si la persona no está en el legajo, con esto se la da de alta.</Text> : null}
-        <Text style={etiqueta}>Fecha de nacimiento</Text>
         <FechaInput label="Fecha de nacimiento" value={datos.fecha_nacimiento} onSelect={(texto) => cambiar({ fecha_nacimiento: texto })} />
         {errorCampo(['fecha_nacimiento'])}
         <Text style={etiqueta}>Teléfono de contacto</Text>
