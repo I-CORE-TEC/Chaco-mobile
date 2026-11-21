@@ -300,7 +300,7 @@ export default function DispositivoCompletarScreen({ inspeccionId, onTerminar })
       onChange={(valor) => ponerValor(field.clave, valor)}
       busqueda={busqueda[field.clave] || ''}
       onBuscar={(texto) => setBusqueda((prev) => ({ ...prev, [field.clave]: texto }))}
-      renderFecha={(props) => <FechaInput {...props} />}
+      renderFecha={(props) => <FechaInput {...props} mostrarRotulo={false} />}
       onAbrirArchivo={abrirArchivo} onQuitarArchivo={quitarArchivo} onVerArchivo={verArchivo} onFirmar={guardarFirma} />
   );
 

@@ -7,20 +7,29 @@ import WebDateInput from './WebDateInput';
 
 // Fecha de un campo del formulario. El valor circula como DD/MM/AAAA, igual que en Becas.
 // `disabled` (opcional, false por defecto): se ve y se lee, pero no abre el selector.
+// `mostrarRotulo` (true por defecto): dibuja `label` arriba del campo. En false, quien lo usa ya pone su rótulo.
 const aIso = (texto) => {
   const partes = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(String(texto || '').trim());
   return partes ? `${partes[3]}-${partes[2]}-${partes[1]}` : '';
 };
 const aTexto = (fecha) => `${String(fecha.getDate()).padStart(2, '0')}/${String(fecha.getMonth() + 1).padStart(2, '0')}/${fecha.getFullYear()}`;
 
-export default function FechaInput({ label, value, onSelect, required = false, disabled = false }) {
+export default function FechaInput({ label, value, onSelect, required = false, disabled = false, mostrarRotulo = true }) {
   const { theme, typography } = useTheme();
   const [abierto, setAbierto] = useState(false);
+  const rotulo = mostrarRotulo && label ? (
+    <Text style={[styles.rotulo, { color: theme.colors.text, fontFamily: typography.semibold }]}>{`${label}${required ? ' *' : ''}`}</Text>
+  ) : null;
   const caja = [styles.input, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }, disabled && styles.deshabilitado];
 
   if (Platform.OS === 'web') {
-    return <WebDateInput value={aIso(value)} onSelect={onSelect} label={label} required={required} disabled={disabled}
-      style={[styles.input, disabled && styles.deshabilitado]} />;
+    return (
+      <>
+        {rotulo}
+        <WebDateInput value={aIso(value)} onSelect={onSelect} label={label} required={required} disabled={disabled}
+          style={[styles.input, disabled && styles.deshabilitado]} />
+      </>
+    );
   }
 
   const iso = aIso(value);
@@ -42,18 +51,21 @@ export default function FechaInput({ label, value, onSelect, required = false, d
   };
 
   return (
-    <View>
-      <Pressable accessibilityRole="button" accessibilityLabel={`${label}${required ? ', obligatorio' : ''}`}
-        accessibilityState={{ disabled }} disabled={disabled} onPress={abrir} style={caja}>
-        <Text style={{ color: value ? theme.colors.text : theme.colors.textSoft, fontFamily: typography.medium }}>
-          {value || 'Seleccionar fecha'}
-        </Text>
-      </Pressable>
-      {abierto && !disabled && Platform.OS === 'ios' ? (
-        <DateTimePicker value={inicial} mode="date" display="inline"
-          onChange={(event, elegida) => { if (event.type !== 'dismissed' && elegida) onSelect(aTexto(elegida)); }} />
-      ) : null}
-    </View>
+    <>
+      {rotulo}
+      <View>
+        <Pressable accessibilityRole="button" accessibilityLabel={`${label}${required ? ', obligatorio' : ''}`}
+          accessibilityState={{ disabled }} disabled={disabled} onPress={abrir} style={caja}>
+          <Text style={{ color: value ? theme.colors.text : theme.colors.textSoft, fontFamily: typography.medium }}>
+            {value || 'Seleccionar fecha'}
+          </Text>
+        </Pressable>
+        {abierto && !disabled && Platform.OS === 'ios' ? (
+          <DateTimePicker value={inicial} mode="date" display="inline"
+            onChange={(event, elegida) => { if (event.type !== 'dismissed' && elegida) onSelect(aTexto(elegida)); }} />
+        ) : null}
+      </View>
+    </>
   );
 }
 
@@ -68,4 +80,5 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   deshabilitado: { opacity: 0.5 },
+  rotulo: { fontSize: fontSizes.sm },
 });
