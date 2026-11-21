@@ -447,7 +447,7 @@ Reglas (`src/services/emergenciaLlegadas.js`, `src/utils/fichaEmergencia.js`):
   `POST /api/emergencia/personas/consultar/` solo con el DNI (legajos) y completa nombre, apellido,
   fecha y sexo si siguen vacíos (todo editable; sin red, un error o un back viejo que pide sexo, en
   silencio). Si no figura, al elegir el sexo (o con «Buscar persona») la busca también en la Base de
-  Personas. Con un envío pendiente no consulta.
+  Personas. «Buscar persona» reemplaza nombre, apellido y fecha con lo que encuentre. Con un envío pendiente no consulta.
 
 
 Reglas (`src/services/emergenciaLlegadas.js`):

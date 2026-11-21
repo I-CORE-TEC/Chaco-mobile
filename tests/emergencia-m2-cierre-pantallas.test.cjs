@@ -963,3 +963,23 @@ test('Puerta (autoconsulta): con un envío pendiente no consulta ni modifica nad
     assert.equal(segunda.input('Nombre').props.value, 'Rosa');
   } finally { await segunda.close(); }
 });
+
+test('Puerta (autoconsulta): «Buscar persona» reemplaza lo tipeado con lo del legajo; la automática no lo pisa', async () => {
+  let respuesta = () => response(404, sinRespuesta);
+  const ui = await montarPuerta(() => response(201, INGRESO), {consulta: () => respuesta()});
+  try {
+    await ui.escribir('Nombre', 'Marta');
+    await ui.escribir('Apellido', 'Lopez');
+    respuesta = () => response(200, LEGAJO);
+    await ui.pressButton('Buscar persona');
+    assert.equal(ui.consultas.length, 2);
+    assert.deepEqual(plano(ui.consultas[1].body), {dni: '30111222'});
+    assert.deepEqual(lleno(ui), {nombre: 'Rosa', apellido: 'Benitez'});
+    assert.equal(ui.tree.root.findAllByType('FechaInput')[0].props.value, '02/03/1984');
+    // Ya encontrada: el botón vuelve a consultar y reemplaza otra vez.
+    respuesta = () => response(200, {...LEGAJO, data: {...LEGAJO.data, nombre: 'Rosa Maria'}});
+    await ui.pressButton('Buscar persona');
+    assert.equal(ui.consultas.length, 3);
+    assert.equal(lleno(ui).nombre, 'Rosa Maria');
+  } finally { await ui.close(); }
+});

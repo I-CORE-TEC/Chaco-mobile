@@ -165,8 +165,8 @@ export default function EmergenciaPuertaScreen({
 
   // Busca a la persona del DNI fijo. Sin `sexo`: solo legajos, y todo fallo es silencioso (el formulario
   // sigue a mano). Con `sexo` F/M: legajos y Base de Personas, como en el Formulario 1. Solo completa
-  // si nombre y apellido siguen vacíos (lo tipeado no se pisa) y no toca nada con un envío en curso o pendiente.
-  const consultar = async ({ automatica = false, sexo: sexoElegido } = {}) => {
+  // si nombre y apellido siguen vacíos (lo tipeado no se pisa; solo «Buscar persona» reemplaza) y no toca nada con un envío en curso o pendiente.
+  const consultar = async ({ automatica = false, reemplazar = false, sexo: sexoElegido } = {}) => {
     if (fijoRef.current || enviandoRef.current || !sesionRef.current) return;
     const sexo = String(sexoElegido ?? datosRef.current?.sexo ?? '').toUpperCase();
     const conSexo = sexo === 'F' || sexo === 'M';
@@ -186,14 +186,14 @@ export default function EmergenciaPuertaScreen({
       if (!vigente()) return;
       const persona = respuesta?.data || {};
       const actual = datosRef.current || {};
-      if (String(actual.nombre || '').trim() || String(actual.apellido || '').trim()) return;
+      if (!reemplazar && (String(actual.nombre || '').trim() || String(actual.apellido || '').trim())) return;
       encontradaRef.current = true;
       const sexoPersona = String(persona.sexo || '').toUpperCase();
       setDatos((prev) => ({
         ...prev,
         nombre: persona.nombre || prev.nombre,
         apellido: persona.apellido || prev.apellido,
-        fecha_nacimiento: !prev.fecha_nacimiento && persona.fecha_nacimiento ? normalizeDateText(persona.fecha_nacimiento) : prev.fecha_nacimiento,
+        fecha_nacimiento: persona.fecha_nacimiento && (reemplazar || !prev.fecha_nacimiento) ? normalizeDateText(persona.fecha_nacimiento) : prev.fecha_nacimiento,
         sexo: !prev.sexo && (sexoPersona === 'F' || sexoPersona === 'M') ? sexoPersona : prev.sexo,
       }));
       setErroresServidor((prev) => {
@@ -481,7 +481,7 @@ export default function EmergenciaPuertaScreen({
           })}
         </View>
         <CustomButton title="Buscar persona" variant="secondary" iconLeft="search-outline" disabled={fijo || !!consultando || !sesion}
-          onPress={() => consultar()} />
+          onPress={() => consultar({ reemplazar: true })} />
         {consultando ? (
           <View style={styles.buscando}>
             <ActivityIndicator color={theme.colors.primary} accessibilityLabel="Buscando a la persona" />
