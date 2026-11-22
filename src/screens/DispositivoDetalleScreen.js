@@ -6,7 +6,7 @@ import { useToast } from '../context/ToastContext';
 import CustomButton from '../components/CustomButton';
 import { statusTones } from '../theme/statusBadges';
 import { getInspeccion, reintentarFallidas, descartarEnvio } from '../services/dispositivosService';
-import { direccionDe, mapaUrl, describirEnvio, etiquetasDeCampos, textoEnEspera, mensajeDeCarga, ETIQUETA_ENVIO } from '../utils/dispositivos';
+import { direccionDe, mapaUrl, describirEnvio, etiquetasDeCampos, textoEnEspera, mensajeDeCarga, claveAviso, ETIQUETA_ENVIO } from '../utils/dispositivos';
 import { formatDate } from '../utils/dates';
 import { fontSizes, radii } from '../theme';
 
@@ -160,8 +160,8 @@ export default function DispositivoDetalleScreen({ inspeccionId, onCompletar, on
           <Text accessibilityRole="header" style={[styles.titulo, { color: statusTones.warning.tx, fontFamily: typography.bold }]}>
             Avisos del envío
           </Text>
-          {envio.avisos.map((aviso) => (
-            <Text key={aviso} style={[styles.valor, { color: statusTones.warning.tx, fontFamily: typography.medium }]}>{`• ${aviso}`}</Text>
+          {envio.avisos.map((aviso, indice) => (
+            <Text key={claveAviso(envio.avisos, indice)} style={[styles.valor, { color: statusTones.warning.tx, fontFamily: typography.medium }]}>{`• ${aviso}`}</Text>
           ))}
         </View>
       ) : null}

@@ -6,7 +6,7 @@ import { useTheme } from '../context/ThemeContext';
 import { statusTones } from '../theme/statusBadges';
 import CustomButton from '../components/CustomButton';
 import { getInspecciones } from '../services/dispositivosService';
-import { direccionDe, seccionesDeLista, describirEnvio, mensajeDeCarga, ETIQUETA_ENVIO } from '../utils/dispositivos';
+import { direccionDe, seccionesDeLista, describirEnvio, mensajeDeCargaLista, ETIQUETA_ENVIO } from '../utils/dispositivos';
 import { formatDate } from '../utils/dates';
 import { fontSizes, radii } from '../theme';
 
@@ -31,7 +31,7 @@ export default function DispositivosListaScreen({ onAbrir, syncTick = 0 }) {
       setItems(await getInspecciones({ refreshFromRemote: remoto }));
       setError('');
     } catch (e) {
-      setError(mensajeDeCarga(e, 'No se pudo cargar la lista.'));
+      setError(mensajeDeCargaLista(e, 'No se pudo cargar la lista.'));
     } finally {
       enCurso.current -= 1;
       if (enCurso.current === 0) setLoading(false);

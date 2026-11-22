@@ -272,31 +272,52 @@ test('Detalle: un 404 al cargar nombra el alcance y ofrece Reintentar', async ()
   } finally {await ui.close();}
 });
 
-test('Lista: un error de carga sin datos ofrece Reintentar y un 403 nombra el alcance', async () => {
+test('Lista: un 404 del listado dice «tus relevamientos» (no «este edificio») y ofrece Reintentar', async () => {
   const {mocks} = await baseMocks();
   let pedidos = 0;
   Object.assign(mocks, {
     '@react-native-community/netinfo': {__esModule: true, default: {fetch: async () => ({isConnected: true, isInternetReachable: true})}},
     '../services/conectividad': {hayRed: async () => true, hayRedEn: () => true, escucharReconexion: () => () => {}},
-    '../services/dispositivosService': {getInspecciones: async () => { pedidos += 1; throw Object.assign(new Error('x'), {status: 403, payload: {detail: 'No.'}}); }},
+    '../services/dispositivosService': {getInspecciones: async () => { pedidos += 1; throw Object.assign(new Error('x'), {status: 404, payload: {detail: 'No encontrado.'}}); }},
   });
   const Screen = loadScreen('src/screens/DispositivosListaScreen.js', mocks);
   const ui = await render(Screen, {onAbrir() {}});
   try {
-    assert.ok(ui.labels().some(label => label.startsWith('No tenés acceso a este edificio o dispositivo')));
+    assert.ok(ui.labels().some(label => label.startsWith('No pudimos cargar tus relevamientos.')));
+    assert.equal(ui.labels().some(label => label.includes('este edificio')), false);
     assert.ok(ui.tree.root.findAllByProps({accessibilityRole: 'header'}).length >= 1);
     await ui.pressButton('Reintentar');
     assert.equal(pedidos, 2);
   } finally {await ui.close();}
 });
 
-test('esFueraDeAlcance: 404 y 403 si; SIN_MODULO, clave provisoria y 500 no', () => {
+test('Lista: un 403 HTML del WAF no habla del alcance, muestra el mensaje del error', async () => {
+  const {mocks} = await baseMocks();
+  Object.assign(mocks, {
+    '@react-native-community/netinfo': {__esModule: true, default: {fetch: async () => ({isConnected: true, isInternetReachable: true})}},
+    '../services/conectividad': {hayRed: async () => true, hayRedEn: () => true, escucharReconexion: () => () => {}},
+    '../services/dispositivosService': {getInspecciones: async () => { throw Object.assign(new Error('El servidor devolvio una pagina HTML inesperada (HTTP 403).'), {status: 403, payload: null, unexpectedHtml: true}); }},
+  });
+  const Screen = loadScreen('src/screens/DispositivosListaScreen.js', mocks);
+  const ui = await render(Screen, {onAbrir() {}});
+  try {
+    assert.ok(ui.labels().some(label => label.includes('pagina HTML inesperada')));
+    assert.equal(ui.labels().some(label => label.includes('alcance')), false);
+  } finally {await ui.close();}
+});
+
+test('esFueraDeAlcance: 404 si; 403 SIN_MODULO, 403 HTML del WAF (sin payload) y 500 no', () => {
   const u = loadPure('src/utils/dispositivos.js');
   assert.equal(u.esFueraDeAlcance({status: 404}), true);
-  assert.equal(u.esFueraDeAlcance({status: 403, payload: {detail: 'No'}}), true);
   assert.equal(u.esFueraDeAlcance({status: 403, payload: {code: 'SIN_MODULO'}}), false);
+  assert.equal(u.esFueraDeAlcance({status: 403, payload: null, unexpectedHtml: true}), false);
+  assert.equal(u.esFueraDeAlcance({status: 403}), false);
+  assert.equal(u.esFueraDeAlcance({status: 403, payload: {}}), false);
+  assert.equal(u.esFueraDeAlcance({status: 403, payload: {detail: 'No tiene permiso.'}}), true);
+  assert.equal(u.esFueraDeAlcance({status: 404, unexpectedHtml: true, payload: null}), false);
   assert.equal(u.esFueraDeAlcance({status: 403, payload: {codigo: 'CLAVE_PROVISORIA'}}), false);
   assert.equal(u.esFueraDeAlcance({status: 500}), false);
+  assert.equal(u.mensajeDeCarga({status: 403, payload: null, message: 'HTML'}, 'base'), 'HTML');
   assert.equal(u.mensajeDeCarga({status: 500, message: 'Boom'}, 'base'), 'Boom');
   assert.equal(u.mensajeDeCarga({}, 'base'), 'base');
 });
@@ -608,4 +629,12 @@ test('FIRMA: en la PWA la firma (data: URI) queda en el borrador; un archivo blo
   assert.deepEqual(guardado.valores['cp-firma'].firmante, {nombre: 'Ana Pérez', dni: '30123456'});
   assert.equal(Object.hasOwn(guardado.valores, 'cp-plano'), false);
   assert.equal(guardado.sinArchivos, true);
+});
+
+test('claveAviso: el texto solo; con repetidos suma el orden y no hay claves duplicadas', () => {
+  const u = loadPure('src/utils/dispositivos.js');
+  const avisos = ['a', 'b', 'a', 'a'];
+  const claves = avisos.map((_, i) => u.claveAviso(avisos, i));
+  assert.deepEqual(claves, ['a', 'b', 'a#1', 'a#2']);
+  assert.equal(new Set(claves).size, claves.length);
 });
