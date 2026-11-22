@@ -51,7 +51,7 @@ test('DNI de 7 u 8 números; nombre y apellido salvo persona confirmada', async 
   assert.equal(r.personaConfirmada({estado: 'encontrada', dni: '30111222', sexo: 'F'}), false);
   assert.equal(r.ETIQUETAS.fotos, 'Fotos');
   assert.deepEqual(plano(Object.keys(r.validarConsulta({dni: '30111222', sexo: 'f'}))), []);
-  assert.deepEqual(plano(Object.keys(r.validarConsulta({dni: '30', sexo: 'X'}))), ['dni', 'sexo']);
+  assert.deepEqual(plano(Object.keys(r.validarConsulta({dni: '30', sexo: 'X'}, {conSexo: true}))), ['dni', 'sexo']);
 });
 
 test('fecha de nacimiento opcional pero real', async () => {
@@ -224,4 +224,23 @@ test('filtrarLocalidades: sin acentos, primero las que empiezan con lo escrito, 
   assert.deepEqual(r.filtrarLocalidades(lista, '').length, 0);
   assert.equal(r.filtrarLocalidades(lista, 'e', 2).length, 2);
   assert.equal(r.resumenDeFamilia({...VALIDO, menores_f: 2}), 'Benitez, Rosa · DNI 30111222 · 3 personas');
+});
+
+test('la consulta busca solo por DNI: el sexo se exige únicamente en la segunda pasada, con el mensaje del backoffice (#1301, #1299)', async () => {
+  const r = await cargar();
+  assert.deepEqual(plano(r.validarConsulta({dni: '30111222'})), {});
+  assert.deepEqual(plano(r.validarConsulta({dni: '30111'})), {dni: ['Ingresá un DNI válido de 7 u 8 dígitos, sin puntos.']});
+  assert.ok(r.validarConsulta({dni: '30111222'}, {conSexo: true}).sexo);
+  assert.deepEqual(plano(r.validarConsulta({dni: '30111222', sexo: 'f'}, {conSexo: true})), {});
+});
+
+test('lo que confirmó un legajo es del DNI: cambiar el sexo a mano no lo invalida; Base de Personas y el escaneo sí dependen del sexo', async () => {
+  const r = await cargar();
+  const legajo = {estado: 'encontrada', origen: 'legajo', dni: '30111222', sexo: ''};
+  assert.equal(r.personaConfirmada(legajo, {dni: '30.111.222', sexo: 'M'}), true);
+  assert.equal(r.personaConfirmada(legajo, {dni: '30111223', sexo: ''}), false);
+  const personas = {estado: 'encontrada', origen: 'personas', dni: '30111222', sexo: 'F'};
+  assert.equal(r.personaConfirmada(personas, {dni: '30111222', sexo: 'F'}), true);
+  assert.equal(r.personaConfirmada(personas, {dni: '30111222', sexo: 'M'}), false);
+  assert.equal(r.personaConfirmada({estado: 'escaneado', dni: '30111222', sexo: 'F'}, {dni: '30111222', sexo: 'M'}), false);
 });

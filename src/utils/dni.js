@@ -4,6 +4,15 @@
 export const cleanDigits = (value = '') => String(value || '').replace(/\D/g, '');
 export const isValidDni = (value = '') => /^\d{7,8}$/.test(cleanDigits(value));
 
+// Lo mismo que `core.dni` del back (`LARGOS_DNI_VALIDOS`, `MENSAJE_DNI_INVALIDO`, `normalizar_dni`, `dni_valido`):
+// el DNI son solo dígitos, de 7 u 8, y el mensaje es el mismo que ve el backoffice.
+export const DNI_LARGO_MAXIMO = 8;
+export const MENSAJE_DNI_INVALIDO = 'Ingresá un DNI válido de 7 u 8 dígitos, sin puntos.';
+// Lo tecleado o pegado reducido a lo que el campo acepta: dígitos, hasta el largo máximo.
+export const tecleadoDni = (value = '') => cleanDigits(value).slice(0, DNI_LARGO_MAXIMO);
+// Para mostrar: `49103788` → `49.103.788`, como el filtro `|dni` del backoffice. Se envía siempre sin puntos.
+export const formatDni = (value = '') => cleanDigits(value).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+
 export const normalizeToken = (value = '') =>
   String(value || '')
     .normalize('NFD')

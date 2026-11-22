@@ -39,7 +39,12 @@ function loadScreen(relative, mocks, timers = {}) {
   const context = vm.createContext({console, setTimeout, clearTimeout, Date,
     setInterval: timers.setInterval || (() => 0), clearInterval: timers.clearInterval || (() => {}), ...(timers.globals || {})});
   vm.runInContext('(function(require,module,exports){' + code + '\n})', context)(
-    name => { assert.ok(mocks[name], 'Missing screen mock: ' + name); return mocks[name]; }, module, module.exports);
+    name => {
+      // El interruptor es un componente real y compartido: se carga con los mismos mocks que la pantalla.
+      if (name === '../components/InterruptorSiNo' && !mocks[name]) mocks[name] = {__esModule: true, default: loadScreen('src/components/InterruptorSiNo.js', mocks)};
+      assert.ok(mocks[name], 'Missing screen mock: ' + name);
+      return mocks[name];
+    }, module, module.exports);
   return module.exports.default;
 }
 
@@ -116,7 +121,7 @@ function colaFalsa({borrador = null, encolar = null, locales = [], misEnvios = {
   return cola;
 }
 
-async function montarFormulario({borrador, encolar, consultar, props = {}, jpeg} = {}) {
+async function montarFormulario({borrador, encolar, consultar, sugerir, props = {}, jpeg} = {}) {
   const {mocks, toasts, alerts, runtime} = await baseMocks();
   const emergencia = runtime.load('../utils/emergencia');
   const cola = colaFalsa({borrador, encolar});
@@ -125,6 +130,7 @@ async function montarFormulario({borrador, encolar, consultar, props = {}, jpeg}
     return b && {...b, datos: {...emergencia.datosIniciales(), ...(borrador?.datos || {})}};
   })(cola.abrirBorrador);
   const consultas = [];
+  const sugeridos = [];
   const conversiones = [];
   const ubicacion = {pedidos: 0};
   const terminados = [];
@@ -137,14 +143,22 @@ async function montarFormulario({borrador, encolar, consultar, props = {}, jpeg}
       launchCameraAsync: async () => ({canceled: false, assets: [{uri: 'file:///cache/camara.heic', fileName: 'IMG.HEIC'}]}),
       launchImageLibraryAsync: async () => ({canceled: false, assets: [{uri: 'file:///cache/galeria.png', fileName: 'g.png'}]}),
     },
-    '../services/emergenciaApi': {consultarPersona: async (args) => { consultas.push(args); return consultar ? consultar(args) : {success: true, origen: 'personas', data: {nombre: 'Rosa', apellido: 'Benitez', fecha_nacimiento: '1984-03-02'}}; }},
+    '../services/emergenciaApi': {
+      sugerirPersonas: async (dni) => { sugeridos.push(dni); if (sugerir) return sugerir(dni); return {resultados: [], hay_mas: false}; },
+      consultarPersona: async (args) => {
+        consultas.push(args);
+        if (consultar) return consultar(args);
+        // Como el back (Cambio 522): sin sexo solo se busca en legajos, y esta persona no está.
+        if (!args.sexo) throw Object.assign(new Error('No figura en los legajos'), {status: 404, payload: {success: false, no_en_legajo: true}});
+        return {success: true, origen: 'personas', data: {nombre: 'Rosa', apellido: 'Benitez', fecha_nacimiento: '1984-03-02'}};
+      }},
     '../services/ubicacion': {UBICACION_DEMORADA: 'UBICACION_DEMORADA', posicionActual: async () => { ubicacion.pedidos += 1; return {coords: {latitude: -27.4512345, longitude: -58.9876543, accuracy: 12.34}}; }},
     '../services/emergenciaCola': cola,
     '../utils/jpeg': {aJpeg: jpeg || (async (asset) => { conversiones.push(asset); return {...asset, uri: 'file:///cache/ImageManipulator/x.jpg', fileName: 'x.jpg', mimeType: 'image/jpeg', size: 1000}; })},
   });
   const Screen = loadScreen('src/screens/EmergenciaFormulario1Screen.js', mocks);
   const ui = await render(Screen, {onTerminar: (r) => terminados.push(r), ...props});
-  return {...ui, cola, toasts, alerts, consultas, conversiones, ubicacion, terminados, emergencia, olvidados};
+  return {...ui, cola, toasts, alerts, consultas, sugeridos, conversiones, ubicacion, terminados, emergencia, olvidados};
 }
 
 const COMPLETO = {traslado: 'BOMBEROS', dni: '30111222', sexo: 'F', nombre: 'Rosa', apellido: 'Benitez', adultos_f: 1, direccion: 'Calle 1'};
@@ -157,7 +171,7 @@ test('Formulario 1: sin datos no encola y muestra qué corregir, campo por campo
     assert.equal(ui.cola.calls.encolados.length, 0);
     const labels = ui.labels();
     assert.ok(labels.includes('Para corregir'));
-    for (const esperado of ['• Traslado: Elegí cómo llegó la familia.', '• DNI: El DNI del responsable tiene que tener 7 u 8 números.',
+    for (const esperado of ['• Traslado: Elegí cómo llegó la familia.', '• DNI: Ingresá un DNI válido de 7 u 8 dígitos, sin puntos.',
       '• Nombre: Escribí el nombre del responsable.', '• Apellido: Escribí el apellido del responsable.',
       '• Dirección: Escribí la dirección o una referencia: es el mínimo para ubicar a la familia.']) {
       assert.ok(labels.includes(esperado), esperado);
@@ -184,16 +198,20 @@ test('Formulario 1: consulta, contadores, localidad, GPS, foto y envío con la h
     await ui.press('Traslado: Bomberos');
     await ui.escribir('DNI del responsable', '30.111.222');
     assert.equal(ui.input('DNI del responsable').props.value, '30111222');
+    assert.equal(ui.porLabel('Sexo: Femenino').length, 0, 'el sexo no se pide para buscar');
     await ui.pressButton('Buscar persona');
-    assert.ok(ui.labels().some(l => l.startsWith('Elegí el sexo')), 'sin sexo no consulta');
-    assert.equal(ui.consultas.length, 0);
+    assert.deepEqual(JSON.parse(JSON.stringify(ui.consultas)), [{dni: '30111222'}], 'busca solo por DNI');
+    assert.ok(ui.labels().some(l => l.startsWith('No figura en los legajos de DATAÑACH. Elegí el sexo')), 'no está en los legajos: ahora sí pide el sexo');
+    await ui.pressButton('Buscar persona');
+    assert.ok(ui.labels().some(l => l.startsWith('Elegí el sexo')), 'sin sexo no sale a Base de Personas');
+    assert.equal(ui.consultas.length, 1);
     await ui.press('Sexo: Femenino');
     await ui.pressButton('Buscar persona');
-    assert.deepEqual(JSON.parse(JSON.stringify(ui.consultas)), [{dni: '30111222', sexo: 'F'}]);
+    assert.deepEqual(JSON.parse(JSON.stringify(ui.consultas)), [{dni: '30111222'}, {dni: '30111222', sexo: 'F'}]);
     assert.equal(ui.input('Nombre').props.value, 'Rosa');
     assert.equal(ui.input('Apellido').props.value, 'Benitez');
     assert.equal(ui.tree.root.findByType('FechaInput').props.value, '02/03/1984');
-    assert.ok(ui.labels().includes('Encontramos a Rosa Benitez en la Base de Personas.'));
+    assert.ok(ui.labels().includes('Benitez, Rosa · femenino · encontrada en la Base de Personas'));
     assert.ok(ui.labels().includes('Nombre'), 'encontrada: nombre no obligatorio');
 
     await ui.press('Sumar Adultos · Mujeres');
@@ -276,7 +294,6 @@ test('Formulario 1: persona que no figura o sin red pide nombre y apellido; camb
   const ui = await montarFormulario({consultar: () => respuesta()});
   try {
     await ui.escribir('DNI del responsable', '30111222');
-    await ui.press('Sexo: Masculino');
     await ui.pressButton('Buscar persona');
     assert.ok(ui.labels().includes('No figura en la Base de Personas ni en los legajos de DATAÑACH: cargá nombre y apellido para darla de alta.'));
     assert.ok(ui.labels().includes('Nombre *'));
@@ -294,16 +311,124 @@ test('Formulario 1: persona que no figura o sin red pide nombre y apellido; camb
   } finally { await ui.close(); }
 });
 
-test('Formulario 1: con origen legajo el aviso nombra los legajos de DATAÑACH', async () => {
-  const ui = await montarFormulario({consultar: () => ({success: true, origen: 'legajo', data: {nombre: 'Rosa', apellido: 'Benitez'}})});
+test('Formulario 1: con origen legajo muestra a quién encontró, su sexo, el origen y el DNI con puntos (#1301, #1299)', async () => {
+  const ui = await montarFormulario({consultar: () => ({success: true, origen: 'legajo', data: {nombre: 'Adriana', apellido: 'Acevedo', sexo: 'F', dni: '49103788'}})});
   try {
     await ui.press('Traslado: Bomberos');
-    await ui.escribir('DNI del responsable', '30111222');
-    await ui.press('Sexo: Femenino');
+    await ui.escribir('DNI del responsable', '49103788');
     await ui.pressButton('Buscar persona');
-    assert.ok(ui.labels().includes('Encontramos a Rosa Benitez en los legajos de DATAÑACH.'));
+    assert.deepEqual(JSON.parse(JSON.stringify(ui.consultas)), [{dni: '49103788'}], 'no pide ni manda el sexo');
+    assert.ok(ui.labels().includes('Acevedo, Adriana · femenino · encontrada en los legajos'));
+    assert.ok(ui.labels().includes('DNI 49.103.788'));
+    assert.ok(ui.labels().includes('Sexo: femenino (según el legajo)'));
+    assert.equal(ui.porLabel('Sexo: Masculino').length, 0, 'el sexo del legajo no se elige');
+    assert.equal(ui.input('DNI del responsable').props.value, '49103788', 'el campo queda sin puntos: se envía así');
     assert.ok(!ui.labels().some(l => l.includes('Base de Personas')));
   } finally { await ui.close(); }
+});
+
+test('Formulario 1: el sexo del legajo pisa el que ya había elegido, y un legajo sin sexo deja completarlo sin perder la confirmación (#1301)', async () => {
+  const ui = await montarFormulario({
+    borrador: {datos: {sexo: 'M'}},
+    consultar: () => ({success: true, origen: 'legajo', data: {nombre: 'Adriana', apellido: 'Acevedo', sexo: 'F'}}),
+  });
+  try {
+    await ui.escribir('DNI del responsable', '49103788');
+    await ui.pressButton('Buscar persona');
+    assert.ok(ui.labels().includes('Sexo: femenino (según el legajo)'));
+    await ui.press('Traslado: Bomberos');
+    await ui.press('Sumar Adultos · Mujeres');
+    await ui.escribir('Dirección o referencia', 'Calle 1');
+    await ui.pressButton('Enviar');
+    assert.equal(ui.cola.calls.encolados[0][1].datos.sexo, 'F', 'se envía el sexo del legajo, no el que estaba en el borrador');
+    assert.equal(ui.cola.calls.encolados[0][1].datos.consulta.origen, 'legajo');
+  } finally { await ui.close(); }
+
+  const sinSexo = await montarFormulario({consultar: () => ({success: true, origen: 'legajo', data: {nombre: 'Adriana', apellido: 'Acevedo', sexo: ''}})});
+  try {
+    await sinSexo.escribir('DNI del responsable', '49103788');
+    await sinSexo.pressButton('Buscar persona');
+    assert.ok(sinSexo.labels().includes('Acevedo, Adriana · encontrada en los legajos'));
+    assert.ok(sinSexo.labels().includes('Nombre'), 'confirmada por el legajo');
+    await sinSexo.press('Sexo: Masculino');
+    assert.equal(sinSexo.porLabel('Sexo: Masculino')[0].props.accessibilityState.selected, true, 'permite completarlo');
+    assert.ok(sinSexo.labels().includes('Nombre'), 'completar el sexo no vuelve a pedir nombre y apellido');
+    assert.equal(sinSexo.consultas.length, 1);
+  } finally { await sinSexo.close(); }
+});
+
+test('Formulario 1: un back anterior que exige el sexo (400) cae en el mismo camino: lo pide y busca con él (compatibilidad)', async () => {
+  const ui = await montarFormulario({consultar: (args) => {
+    if (!args.sexo) throw Object.assign(new Error('DNI y sexo (F o M) son requeridos.'), {status: 400, payload: {success: false}});
+    return {success: true, origen: 'personas', data: {nombre: 'Rosa', apellido: 'Benitez'}};
+  }});
+  try {
+    await ui.escribir('DNI del responsable', '30111222');
+    await ui.pressButton('Buscar persona');
+    assert.ok(ui.labels().some(l => l.startsWith('No figura en los legajos de DATAÑACH. Elegí el sexo')));
+    await ui.press('Sexo: Femenino');
+    await ui.pressButton('Buscar persona');
+    assert.ok(ui.labels().includes('Benitez, Rosa · femenino · encontrada en la Base de Personas'));
+    assert.deepEqual(JSON.parse(JSON.stringify(ui.consultas)), [{dni: '30111222'}, {dni: '30111222', sexo: 'F'}]);
+  } finally { await ui.close(); }
+});
+
+test('Formulario 1: el DNI solo admite números, hasta 8, y valida con el texto del backoffice (#1299)', async () => {
+  const ui = await montarFormulario();
+  try {
+    const campo = () => ui.input('DNI del responsable');
+    assert.equal(campo().props.keyboardType, 'number-pad');
+    assert.equal(campo().props.inputMode, 'numeric');
+    await ui.escribir('DNI del responsable', '49.103.788a');
+    assert.equal(campo().props.value, '49103788');
+    await ui.escribir('DNI del responsable', '4910378899');
+    assert.equal(campo().props.value, '49103788', 'el largo máximo es el de un DNI');
+    await ui.escribir('DNI del responsable', 'abc-.');
+    assert.equal(campo().props.value, '');
+    await ui.escribir('DNI del responsable', '123456');
+    await ui.pressButton('Buscar persona');
+    assert.ok(ui.labels().includes('Ingresá un DNI válido de 7 u 8 dígitos, sin puntos.'));
+    assert.equal(ui.consultas.length, 0);
+  } finally { await ui.close(); }
+});
+
+test('Formulario 1: sugiere personas del legajo mientras se escribe el DNI y al elegir una la busca (#1299)', async () => {
+  const ui = await montarFormulario({
+    sugerir: () => ({resultados: [{apellido: 'Acevedo', nombre: 'Adriana', dni: '49103788'}], hay_mas: false}),
+    consultar: () => ({success: true, origen: 'legajo', data: {nombre: 'Adriana', apellido: 'Acevedo', sexo: 'F'}}),
+  });
+  try {
+    await ui.escribir('DNI del responsable', '4910');
+    await esperar(600);
+    assert.deepEqual(ui.sugeridos, [], 'con menos de 5 dígitos no pide: cada pedido gasta de la cubeta de consultas');
+    await ui.escribir('DNI del responsable', '49103');
+    await esperar(600);
+    await renderer.act(async () => { await esperar(); });
+    assert.deepEqual(ui.sugeridos, ['49103']);
+    const [opcion] = ui.porLabel('Elegir a Acevedo, Adriana, DNI 49.103.788');
+    assert.ok(opcion, 'la sugerencia muestra el DNI con puntos');
+    await renderer.act(async () => { await opcion.props.onPress(); });
+    assert.equal(ui.input('DNI del responsable').props.value, '49103788');
+    assert.deepEqual(JSON.parse(JSON.stringify(ui.consultas)), [{dni: '49103788'}]);
+    assert.ok(ui.labels().includes('Acevedo, Adriana · femenino · encontrada en los legajos'));
+    assert.equal(ui.porLabel('Elegir a Acevedo, Adriana, DNI 49.103.788').length, 0, 'ya buscada: se cierran las sugerencias');
+  } finally { await ui.close(); }
+});
+
+test('Formulario 1: sin el extremo de sugerencias (back anterior, 404) o con la cubeta agotada (429) el campo sigue como siempre y no insiste', async () => {
+  for (const status of [404, 429]) {
+    const ui = await montarFormulario({sugerir: () => { throw Object.assign(new Error('x'), {status}); }});
+    try {
+      await ui.escribir('DNI del responsable', '49103');
+      await esperar(600);
+      assert.equal(ui.sugeridos.length, 1, String(status));
+      assert.equal(ui.tree.root.findAll(n => typeof n.props?.accessibilityLabel === 'string' && n.props.accessibilityLabel.startsWith('Elegir a ')).length, 0);
+      await ui.escribir('DNI del responsable', '491037');
+      await esperar(600);
+      assert.equal(ui.sugeridos.length, 1, 'pausa de un minuto: no vuelve a pedir ' + status);
+      assert.equal(ui.input('DNI del responsable').props.value, '491037');
+    } finally { await ui.close(); }
+  }
 });
 
 test('Formulario 1: el escaneo del DNI completa la identidad', async () => {
@@ -687,7 +812,6 @@ test('Formulario 1: una consulta lenta no confirma a otra persona si cambió el 
   const disparar = async (u, titulo) => renderer.act(async () => { u.button(titulo).props.onPress(); await esperar(); });
   try {
     await ui.escribir('DNI del responsable', '30111222');
-    await ui.press('Sexo: Femenino');
     await disparar(ui, 'Buscar persona');
     assert.equal(pedidos.length, 1);
     await ui.escribir('DNI del responsable', '30111223');
@@ -697,31 +821,38 @@ test('Formulario 1: una consulta lenta no confirma a otra persona si cambió el 
     assert.ok(!ui.labels().some(l => l.startsWith('Encontramos')));
     assert.equal(ui.button('Buscar persona').props.loading, false);
 
-    // Mismo DNI, otro sexo: tampoco.
+    // Segunda pasada, con sexo (Base de Personas): primero no está en los legajos, y recién ahí se pide el sexo.
     await disparar(ui, 'Buscar persona');
+    assert.equal(pedidos.length, 2);
+    await renderer.act(async () => { pedidos[1].rechazar(Object.assign(new Error('No'), {status: 404, payload: {no_en_legajo: true}})); await esperar(); });
+    await ui.press('Sexo: Femenino');
+    await disparar(ui, 'Buscar persona');
+    assert.equal(pedidos.length, 3);
+    // Mismo DNI, otro sexo mientras vuela: tampoco.
     await ui.press('Sexo: Masculino');
-    await renderer.act(async () => { pedidos[1].resolver({success: true, data: {nombre: 'Rosa', apellido: 'Benitez'}}); await esperar(); });
+    await renderer.act(async () => { pedidos[2].resolver({success: true, origen: 'personas', data: {nombre: 'Rosa', apellido: 'Benitez'}}); await esperar(); });
     assert.ok(ui.labels().includes('Nombre *'));
     // Un 404 tardío tampoco marca nada.
     await disparar(ui, 'Buscar persona');
     await ui.escribir('DNI del responsable', '30111224');
-    await renderer.act(async () => { pedidos[2].rechazar(Object.assign(new Error('No'), {status: 404, payload: {}})); await esperar(); });
+    await renderer.act(async () => { pedidos[3].rechazar(Object.assign(new Error('No'), {status: 404, payload: {}})); await esperar(); });
     assert.ok(!ui.labels().includes('No figura en la Base de Personas ni en los legajos de DATAÑACH: cargá nombre y apellido para darla de alta.'));
 
     // Dos pedidos seguidos del mismo DNI: vale el último.
     await disparar(ui, 'Buscar persona');
     await disparar(ui, 'Buscar persona');
-    await renderer.act(async () => { pedidos[4].resolver({success: true, data: {nombre: 'Juan', apellido: 'Paz'}}); await esperar(); });
-    await renderer.act(async () => { pedidos[3].resolver({success: true, data: {nombre: 'Viejo', apellido: 'Lento'}}); await esperar(); });
+    assert.equal(pedidos.length, 6);
+    await renderer.act(async () => { pedidos[5].resolver({success: true, origen: 'legajo', data: {nombre: 'Juan', apellido: 'Paz', sexo: 'M'}}); await esperar(); });
+    await renderer.act(async () => { pedidos[4].resolver({success: true, origen: 'legajo', data: {nombre: 'Viejo', apellido: 'Lento', sexo: 'F'}}); await esperar(); });
     assert.equal(ui.input('Nombre').props.value, 'Juan');
-    assert.ok(ui.labels().includes('Nombre'), 'confirmada para el DNI y sexo actuales');
+    assert.ok(ui.labels().includes('Nombre'), 'confirmada para el DNI actual');
     // La confirmación que se guarda dice de quién es.
     await ui.press('Traslado: Bomberos');
     await ui.press('Sumar Adultos · Varones');
     await ui.escribir('Dirección o referencia', 'Calle 1');
     await ui.pressButton('Enviar');
     const [, {datos}] = ui.cola.calls.encolados[0];
-    assert.deepEqual({...datos.consulta}, {estado: 'encontrada', dni: '30111224', sexo: 'M'});
+    assert.deepEqual({...datos.consulta}, {estado: 'encontrada', origen: 'legajo', dni: '30111224', sexo: 'M'});
   } finally { await ui.close(); }
 });
 

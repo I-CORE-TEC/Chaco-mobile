@@ -2,7 +2,7 @@
 // red. Las reglas autoritativas son las del back (contrato-app-emergencia §6): estas solo ayudan
 // a cargar bien antes de encolar. Las claves de los errores son las del contrato (las mismas que
 // devuelve el 400 VALIDACION), así la pantalla muestra igual un error local y uno del servidor.
-import { cleanDigits, isValidDni, normalizeDateText } from '../utils/dni';
+import { MENSAJE_DNI_INVALIDO, cleanDigits, isValidDni, normalizeDateText } from '../utils/dni';
 
 export const MAX_TRASLADO_OTRO = 120;
 export const MAX_DIRECCION = 240;
@@ -190,11 +190,12 @@ export const textoDeOcultos = (visible = {}) => {
   return partes.length ? partes.join(' ') : null;
 };
 
-// La consulta de identidad solo necesita DNI y sexo (§4).
-export const validarConsulta = ({ dni, sexo } = {}) => {
+// La consulta de identidad busca solo por DNI (#1301, §4): el sexo solo se pide cuando la persona no está
+// en los legajos (404 `no_en_legajo`), porque Base de Personas lo exige. `conSexo` activa ese segundo paso.
+export const validarConsulta = ({ dni, sexo } = {}, { conSexo = false } = {}) => {
   const errores = {};
-  if (!isValidDni(dni)) errores.dni = ['El DNI tiene que tener 7 u 8 números.'];
-  if (!['F', 'M'].includes(texto(sexo).toUpperCase())) errores.sexo = ['Elegí el sexo que figura en el DNI para buscar a la persona.'];
+  if (!isValidDni(dni)) errores.dni = [MENSAJE_DNI_INVALIDO];
+  if (conSexo && !['F', 'M'].includes(texto(sexo).toUpperCase())) errores.sexo = ['Elegí el sexo que figura en el DNI para buscar a la persona en la Base de Personas.'];
   return errores;
 };
 
@@ -202,9 +203,12 @@ export const validarConsulta = ({ dni, sexo } = {}) => {
 // sin esa confirmación el teléfono no sabe si la persona está en el legajo, y el back los exige
 // para el alta mínima. La confirmación vale solo para el DNI y el sexo con que se hizo: si cambiaron
 // (o una respuesta lenta llegó tarde), es de otra persona.
+// Un legajo se encuentra por DNI, que es único: su sexo lo pone el legajo y completarlo a mano después (legajo
+// sin sexo cargado) no lo vuelve otra persona. Base de Personas y el DNI escaneado sí dependen del sexo.
 export const mismaIdentidad = (consulta, datos = {}) => !!consulta
   && String(consulta.dni ?? '') === cleanDigits(datos?.dni)
-  && texto(consulta.sexo).toUpperCase() === texto(datos?.sexo).toUpperCase();
+  && (consulta.origen === 'legajo'
+    || texto(consulta.sexo).toUpperCase() === texto(datos?.sexo).toUpperCase());
 export const personaConfirmada = (consulta, datos = {}) => ['encontrada', 'escaneado'].includes(consulta?.estado)
   && mismaIdentidad(consulta, datos);
 
@@ -221,7 +225,7 @@ export const validarCaso = (datos = {}) => {
     agregar('traslado_otro', `Hasta ${MAX_TRASLADO_OTRO} caracteres.`);
   }
 
-  if (!isValidDni(datos.dni)) agregar('dni', 'El DNI del responsable tiene que tener 7 u 8 números.');
+  if (!isValidDni(datos.dni)) agregar('dni', MENSAJE_DNI_INVALIDO);
   if (!personaConfirmada(datos.consulta, datos)) {
     if (!texto(datos.nombre)) agregar('nombre', 'Escribí el nombre del responsable.');
     if (!texto(datos.apellido)) agregar('apellido', 'Escribí el apellido del responsable.');

@@ -39,7 +39,12 @@ function loadScreen(relative, mocks, extra = {}) {
   const module = {exports: {}};
   const context = vm.createContext({console, setTimeout, clearTimeout, Date, setInterval: () => 0, clearInterval: () => {}, ...extra});
   vm.runInContext('(function(require,module,exports){' + code + '\n})', context)(
-    name => { assert.ok(mocks[name], 'Missing screen mock: ' + name); return mocks[name]; }, module, module.exports);
+    name => {
+      // El interruptor es un componente real y compartido: se carga con los mismos mocks que la pantalla.
+      if (name === '../components/InterruptorSiNo' && !mocks[name]) mocks[name] = {__esModule: true, default: loadScreen('src/components/InterruptorSiNo.js', mocks)};
+      assert.ok(mocks[name], 'Missing screen mock: ' + name);
+      return mocks[name];
+    }, module, module.exports);
   return module.exports.default;
 }
 

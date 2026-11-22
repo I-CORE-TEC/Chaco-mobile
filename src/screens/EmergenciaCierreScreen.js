@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import TextInput from '../components/FormInput';
+import InterruptorSiNo from '../components/InterruptorSiNo';
 import CustomButton from '../components/CustomButton';
 import { useTheme } from '../context/ThemeContext';
 import { useToast } from '../context/ToastContext';
@@ -349,12 +350,8 @@ export default function EmergenciaCierreScreen({
           <TextInput value={aula} editable={!fijo} maxLength={MAX_AULA} accessibilityLabel="Aula o dormitorio"
             placeholderTextColor={theme.colors.textSoft} onChangeText={cambiar(setAula, 'aula')} style={caja('aula')} />
           {mensajes('aula')}
-          <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: tarjeta, disabled: fijo }} accessibilityLabel="Se entregó la tarjeta familiar"
-            disabled={fijo} onPress={() => cambiar(setTarjeta, 'tarjeta_numero')(!tarjeta)} style={styles.casilla}>
-            <Ionicons name={tarjeta ? 'checkbox' : 'square-outline'} size={24} color={tarjeta ? theme.colors.primary : theme.colors.textSoft}
-              accessible={false} importantForAccessibility="no" />
-            <Text style={[styles.flex, etiqueta]}>Se entregó la tarjeta familiar</Text>
-          </Pressable>
+          <InterruptorSiNo titulo="Se entregó la tarjeta familiar" valor={tarjeta} deshabilitado={fijo}
+            onChange={(valor) => cambiar(setTarjeta, 'tarjeta_numero')(valor)} />
           {tarjeta ? (
             <>
               <Text style={etiqueta}>Número de tarjeta *</Text>
@@ -421,7 +418,6 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   opciones: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   opcion: { borderWidth: 1, borderRadius: radii.full, paddingHorizontal: 14, paddingVertical: 10, minHeight: 44, justifyContent: 'center' },
-  casilla: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 44 },
   input: { minHeight: 46, borderWidth: 1, borderRadius: radii.lg, paddingHorizontal: 12, paddingVertical: 10, fontSize: fontSizes.sm },
   areaTexto: { minHeight: 96, textAlignVertical: 'top' },
   aviso: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: radii.lg, padding: 10 },
