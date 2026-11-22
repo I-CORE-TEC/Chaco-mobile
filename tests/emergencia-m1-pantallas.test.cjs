@@ -416,7 +416,7 @@ test('Formulario 1: sugiere personas del legajo mientras se escribe el DNI y al 
 });
 
 test('Formulario 1: sin el extremo de sugerencias (back anterior, 404) o con la cubeta agotada (429) el campo sigue como siempre y no insiste', async () => {
-  for (const status of [404, 429]) {
+  for (const status of [403, 404, 429]) {
     const ui = await montarFormulario({sugerir: () => { throw Object.assign(new Error('x'), {status}); }});
     try {
       await ui.escribir('DNI del responsable', '49103');

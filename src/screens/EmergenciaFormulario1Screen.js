@@ -30,7 +30,7 @@ import { fontSizes, radii } from '../theme';
 
 const AUTOGUARDADO_MS = 500;
 // Sugerencias del DNI (#1299): desde cuántos dígitos se piden, cuánto se espera tras la última tecla y cuánto se
-// dejan de pedir si el servidor no las tiene (404, back anterior) o la cubeta de consultas se agotó (429).
+// dejan de pedir si el servidor no las tiene (404, back anterior), sin permiso (403) o la cubeta de consultas se agotó (429).
 // Cada pedido gasta de la cubeta `personas_campo` del usuario: por eso 5 dígitos y no 3.
 export const SUGERENCIAS_MIN_DIGITOS = 5;
 export const SUGERENCIAS_ESPERA_MS = 450;
@@ -263,7 +263,7 @@ export default function EmergenciaFormulario1Screen({ uuid = null, onTerminar })
         if (!montado.current || pedidoSugerencias.current !== pedido) return;
         setSugerencias(Array.isArray(respuesta?.resultados) ? respuesta.resultados.slice(0, 5) : []);
       } catch (e) {
-        if ([404, 429].includes(Number(e?.status))) sugerenciasPausadasHasta.current = Date.now() + SUGERENCIAS_PAUSA_MS;
+        if ([403, 404, 429].includes(Number(e?.status))) sugerenciasPausadasHasta.current = Date.now() + SUGERENCIAS_PAUSA_MS;
         if (montado.current && pedidoSugerencias.current === pedido) setSugerencias([]);
       }
     }, SUGERENCIAS_ESPERA_MS);
