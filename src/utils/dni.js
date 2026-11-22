@@ -240,3 +240,18 @@ export const parseDniCode = (rawValue = '', barcodeType = '') => {
   const dniMatch = raw.match(/\b\d{7,8}\b/);
   return { dni_numero: dniMatch?.[0] || '' };
 };
+
+// Sugerencias del DNI (#1299): cuánto se dejan de pedir tras un 403/404/429. Con `Retry-After` (ms) del
+// servidor se espera lo que pidió si es más que la pausa base.
+export const pausaDeSugerencias = (retryAfterMs, baseMs = 60000) => {
+  const pedido = Number(retryAfterMs);
+  return Number.isFinite(pedido) && pedido > baseMs ? pedido : baseMs;
+};
+
+// ¿Se puede contestar con la última respuesta sin gastar otro pedido? `previa` = { q, resultados, hay_mas }.
+// Solo si lo tecleado extiende a `q` y el back dijo `hay_mas: false` (trajo todo): se filtra en el cliente, y
+// una respuesta vacía no se vuelve a pedir. Si no, devuelve null (hay que pedir).
+export const sugerenciasDesdeLaPrevia = (previa, dni) => {
+  if (!previa || previa.hay_mas !== false || !dni || !String(dni).startsWith(previa.q)) return null;
+  return (Array.isArray(previa.resultados) ? previa.resultados : []).filter((r) => cleanDigits(r?.dni).startsWith(dni));
+};

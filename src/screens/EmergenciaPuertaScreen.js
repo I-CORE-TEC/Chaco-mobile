@@ -65,6 +65,7 @@ const ACCIONES = {
 // - `onNoEncontrado()`: 404. `onSinModulo(mensaje)`: 403. `onEnviando(bool)`: hay un envío en curso.
 export default function EmergenciaPuertaScreen({
   dispositivo, dni = '', plazasLibres = 0, accion: accionInicial = 'ingresar', mensaje = '',
+  puedeIngresarIgual = null, puedeAvisarALaMesa = null,
   onIngresado, onAvisado, onNoEncontrado, onSinModulo, onEnviando,
 }) {
   const { theme, typography } = useTheme();
@@ -73,7 +74,7 @@ export default function EmergenciaPuertaScreen({
   const [errorSesion, setErrorSesion] = useState('');
   const [cargando, setCargando] = useState(true);
   const [datos, setDatos] = useState(() => datosDeLaPuerta(dni));
-  const [accion, setAccion] = useState(accionInicial === 'avisar' || plazasLibres < 1 ? 'avisar' : 'ingresar');
+  const [accion, setAccion] = useState(accionInicial === 'avisar' || plazasLibres < 1 || puedeIngresarIgual === false ? 'avisar' : 'ingresar');
   const [pendiente, setPendiente] = useState(null);
   const [sinDatos, setSinDatos] = useState(false);
   const [sinCamas, setSinCamas] = useState(plazasLibres < 1);
@@ -303,7 +304,7 @@ export default function EmergenciaPuertaScreen({
         if (plazas?.length) {
           // 400 `plazas`: se ocuparon las camas. Queda «Avisar a la mesa» con lo cargado.
           setSinCamas(true);
-          setAccion('avisar');
+          if (puedeAvisarALaMesa !== false) setAccion('avisar');
         }
         const generalesYPlazas = [...(plazas || []), ...(generales || [])];
         if (generalesYPlazas.length) setFalla({ tipo: 'rechazo', mensaje: generalesYPlazas.join('\n') });
@@ -398,7 +399,8 @@ export default function EmergenciaPuertaScreen({
   const visible = asistenciaVisible(datos);
   const topes = topesAsistencia(datos);
   const ocultos = textoDeOcultos(visible);
-  const puedeIngresar = !sinCamas || pendiente === 'ingresar';
+  const puedeIngresar = pendiente === 'ingresar' || (!sinCamas && puedeIngresarIgual !== false);
+  const puedeAvisar = pendiente === 'avisar' || puedeAvisarALaMesa !== false;
   const segundos = Math.max(1, Math.ceil((esperaHasta - ahora) / 1000));
   const listado = intentado ? listaDeErrores(errores) : [];
   const botonDe = (cual, principal) => {
@@ -552,7 +554,7 @@ export default function EmergenciaPuertaScreen({
 
       {botonDe(accion, true)}
       {/* Con un envío sin resultado, la otra acción no se ofrece: con otro uuid crearía un segundo caso. */}
-      {!pendiente && (otra === 'avisar' || puedeIngresar) ? botonDe(otra, false) : null}
+      {!pendiente && (otra === 'avisar' ? puedeAvisar : puedeIngresar) ? botonDe(otra, false) : null}
     </ScrollView>
   );
 }

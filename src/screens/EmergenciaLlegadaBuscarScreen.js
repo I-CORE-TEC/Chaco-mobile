@@ -6,6 +6,7 @@ import CustomButton from '../components/CustomButton';
 import { useTheme } from '../context/ThemeContext';
 import {
   TEXTO_SIN_RED, abrirSesion, buscar, clasificarErrorLlegada, escucharRed, hayConexion, pasoDeBusqueda,
+  accionesSinDerivacion,
 } from '../services/emergenciaLlegadas';
 import { cleanDigits } from '../utils/dni';
 import { formatDate } from '../utils/dates';
@@ -14,6 +15,7 @@ import { keyboardDismissModeFor } from '../utils/teclado';
 import { fontSizes, radii } from '../theme';
 
 export const TITULO_BUSCAR = 'Buscar a la familia';
+export const TEXTO_SIN_ACCIONES = 'Tu usuario no puede ingresar a la familia ni avisar a la mesa desde este dispositivo. Consultá con quien administra tu acceso.';
 export const AYUDA_DNI = 'El DNI del responsable o de cualquier persona ya confirmada de la familia.';
 
 // M2-1 · Buscar a la familia por DNI (§13.2) en un dispositivo. Con conexión: sin red se bloquea con
@@ -169,6 +171,7 @@ export default function EmergenciaLlegadaBuscarScreen({
   const tituloBoton = esperando ? `Buscar en ${segundos} s` : 'Buscar';
   const paso = resultado ? pasoDeBusqueda(resultado) : null;
   const camas = resultado?.plazas_libres ?? 0;
+  const acciones = accionesSinDerivacion(resultado);
 
   return (
     <ScrollView style={{ flex: 1, backgroundColor: theme.colors.background }} contentContainerStyle={styles.content}
@@ -198,12 +201,15 @@ export default function EmergenciaLlegadaBuscarScreen({
           <Text accessibilityRole="header" style={[styles.titulo, { color: theme.colors.text, fontFamily: typography.bold }]}>Sin derivación</Text>
           {avisoDe('info', resultado.mensaje || 'No hay una derivación para este DNI en tu dispositivo.')}
           <Text style={ayuda}>{camas === 1 ? '1 cama libre en este dispositivo' : `${camas || 'Sin'} camas libres en este dispositivo`}</Text>
-          {camas >= 1 ? (
+          {acciones.ingresar ? (
             <CustomButton title="Ingresar igual" variant="secondary" iconLeft="enter-outline" disabled={sinRed}
               onPress={() => onSinDerivacion?.('ingresar', resultado)} />
           ) : null}
-          <CustomButton title="Avisar a la mesa" variant="secondary" iconLeft="megaphone-outline" disabled={sinRed}
-            onPress={() => onSinDerivacion?.('avisar', resultado)} />
+          {acciones.avisar ? (
+            <CustomButton title="Avisar a la mesa" variant="secondary" iconLeft="megaphone-outline" disabled={sinRed}
+              onPress={() => onSinDerivacion?.('avisar', resultado)} />
+          ) : null}
+          {!acciones.ingresar && !acciones.avisar ? <Text style={ayuda}>{TEXTO_SIN_ACCIONES}</Text> : null}
         </View>
       ) : null}
 

@@ -29,6 +29,7 @@ export const RUTAS = {
   aceptarDerivacion: (id) => `${BASE}derivaciones/${encodeURIComponent(id)}/aceptar/`,
   rechazarDerivacion: (id) => `${BASE}derivaciones/${encodeURIComponent(id)}/rechazar/`,
   integrantes: (id) => `${BASE}casos/${encodeURIComponent(id)}/integrantes/`,
+  quitarIntegrante: (id, n) => `${BASE}casos/${encodeURIComponent(id)}/integrantes/${encodeURIComponent(n)}/quitar/`,
   integrante: (id, n) => `${BASE}casos/${encodeURIComponent(id)}/integrantes/${encodeURIComponent(n)}/`,
   confirmarIntegrante: (id, n) => `${BASE}casos/${encodeURIComponent(id)}/integrantes/${encodeURIComponent(n)}/confirmar/`,
   plazas: (id, caso) => `${BASE}dispositivos/${encodeURIComponent(id)}/plazas/?caso=${encodeURIComponent(caso)}`,
@@ -229,6 +230,12 @@ export const agregarIntegrante = (casoId, { uuid_cliente } = {}, opciones = {}) 
   exigirUuid(uuid_cliente);
   return conVerificacion(() => pedirJson(RUTAS.integrantes(casoId), { ...opciones, method: 'POST', body: { uuid_cliente } }));
 };
+
+// §13.5 «Quitar persona»: deshace un «Agregar persona» hecho por error. `id` es la clave de la FILA
+// (`integrantes[].id`): `n` se reusa tras una baja, `id` no. Repetirlo con el mismo cuerpo devuelve 200 con
+// `ya_estaba_quitada: true`, así que no necesita uuid.
+export const quitarIntegrante = (casoId, n, { id } = {}, opciones = {}) => conVerificacion(
+  () => pedirJson(RUTAS.quitarIntegrante(casoId, n), { ...opciones, method: 'POST', body: id == null ? {} : { id } }));
 
 // §13.6: una persona con su ficha guardada (`ficha`, `secciones_incompletas`). 404 si `n` no es de la familia.
 export const getIntegrante = (casoId, n, opciones = {}) => conVerificacion(() => pedirJson(RUTAS.integrante(casoId, n), opciones));

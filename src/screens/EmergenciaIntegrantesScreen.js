@@ -7,13 +7,15 @@ import { useToast } from '../context/ToastContext';
 import {
   TEXTO_SIN_RED, abrirSesion, agregarPersona, cargarIntegrantes, cierreDisponible, clasificarErrorLlegada, escucharRed,
   agregarPendiente, esSoloLectura, olvidarAgregarPendiente, estadoDeIntegrante, hayConexion, textoDeCrecimiento, textoDelContador,
-  rotuloDeIntegrante,
+  rotuloDeIntegrante, proximoNumero, quitarPersona,
 } from '../services/emergenciaLlegadas';
 import { statusTones } from '../theme/statusBadges';
 import { fontSizes, radii } from '../theme';
 
 export const TEXTO_ALOJADA = 'Familia alojada: se muestra en modo lectura.';
 export const TEXTO_FICHA_INCOMPLETA = 'Ficha incompleta';
+export const TEXTO_QUITAR_INCIERTO = 'No se pudo confirmar si se quitó la persona. Tocá «Quitar persona» de nuevo: repetirlo no hace nada de más.';
+export const TEXTO_SIN_INTEGRANTES = 'Este caso todavía no tiene personas cargadas. Deslizá hacia abajo para actualizar.';
 const CIERRES = {
   alojar: { titulo: 'Familia alojada', icono: 'home-outline' },
   diferencia: { titulo: 'Cerrar con diferencia', icono: 'git-compare-outline' },
@@ -46,6 +48,7 @@ export default function EmergenciaIntegrantesScreen({
   const [agregando, setAgregando] = useState(false);
   const [falla, setFalla] = useState(null);
   const [reintentoAgregar, setReintentoAgregar] = useState(false);
+  const [quitando, setQuitando] = useState(null);
   const montado = useRef(true);
   const sesionRef = useRef(null);
   const datosRef = useRef(null);
@@ -53,6 +56,7 @@ export default function EmergenciaIntegrantesScreen({
   const pedido = useRef(0);
   const recargaInicial = useRef(recarga);
   const agregandoRef = useRef(false);
+  const quitandoRef = useRef(false);
   const casoId = casoInicial?.id;
 
   const cargar = async ({ silencioso = false } = {}) => {
@@ -143,7 +147,7 @@ export default function EmergenciaIntegrantesScreen({
   };
 
   const mandarAgregar = async () => {
-    if (agregandoRef.current || !sesionRef.current) return;
+    if (agregandoRef.current || quitandoRef.current || !sesionRef.current) return;
     // Se toma antes de mirar la red: dos toques seguidos no pasan los dos.
     agregandoRef.current = true;
     if (!await hayConexion()) {
@@ -200,16 +204,84 @@ export default function EmergenciaIntegrantesScreen({
   };
 
   const tocarAgregar = () => {
-    if (agregandoRef.current) return;
+    if (agregandoRef.current || quitandoRef.current) return;
     // Reintento de un «Agregar» incierto: el mismo pedido (el uuid guardado), sin volver a preguntar.
     if (reintentoAgregar) {
       mandarAgregar();
       return;
     }
-    const siguiente = (datos?.total_declarado || 0) + 1;
+    const siguiente = proximoNumero(datos || {});
     showAlert('Agregar persona', `¿Llegó una persona más? Se suma la persona ${siguiente} a la familia, sin cama reservada: se elige una libre al confirmarla.`, [
       { text: 'Cancelar', style: 'cancel' },
       { text: 'Agregar', onPress: mandarAgregar },
+    ]);
+  };
+
+  // «Quitar persona» (§13.5): deshace un «Agregar persona» hecho por error. El pedido lleva el `id` de la fila
+  // (no solo `n`, que se reusa); repetirlo es seguro, y `ya_estaba_quitada` es un éxito sin aviso.
+  const mandarQuitar = async (integrante) => {
+    if (quitandoRef.current || agregandoRef.current || !sesionRef.current) return;
+    quitandoRef.current = true;
+    if (!await hayConexion()) {
+      quitandoRef.current = false;
+      if (!montado.current) return;
+      setSinRed(true);
+      showAlert('Sin conexión', TEXTO_SIN_RED, [{ text: 'Entendido' }]);
+      return;
+    }
+    setQuitando(integrante.id);
+    setFalla(null);
+    avisarEnviando(true);
+    try {
+      const r = await quitarPersona(sesionRef.current, casoId, integrante);
+      if (!montado.current) return;
+      if (!r.ya_estaba_quitada) {
+        showToast({ type: 'success', message: `Se quitó la persona ${r.n} de la familia.` });
+        // Un «Agregar» en duda ya no corresponde: reintentarlo volvería a sumar a la persona recién quitada.
+        olvidarAgregarPendiente(sesionRef.current, casoId).catch(() => {});
+        setReintentoAgregar(false);
+      }
+      // La fila sale ya: si la recarga falla, la pantalla no queda mostrando a quien se quitó.
+      setDatos((prev) => (prev ? {
+        ...prev, integrantes: prev.integrantes.filter((i) => i.id !== integrante.id), total_declarado: r.total_declarado,
+      } : prev));
+      await cargar();
+    } catch (e) {
+      const c = e?.clasificacion || clasificarErrorLlegada(e);
+      if (c.tipo === 'obsoleto') return;
+      if (c.tipo === 'conflicto') {
+        onConflicto?.(c);
+        return;
+      }
+      if (c.tipo === 'no_encontrado') {
+        onNoEncontrado?.();
+        return;
+      }
+      if (c.tipo === 'sin_modulo') {
+        onSinModulo?.(c.mensaje);
+        return;
+      }
+      if (!montado.current) return;
+      if (c.tipo === 'sin_red') {
+        setSinRed(true);
+        return;
+      }
+      setFalla(c.tipo === 'reintentable' ? { ...c, mensaje: TEXTO_QUITAR_INCIERTO } : c);
+      // Un 400 dice que la fila ya no se puede quitar: se recarga para que el botón refleje el estado real.
+      if (c.tipo === 'rechazo' || c.tipo === 'validacion') cargar({ silencioso: true });
+    } finally {
+      quitandoRef.current = false;
+      if (montado.current) setQuitando(null);
+      avisarEnviando(false);
+    }
+  };
+
+  const tocarQuitar = (integrante) => {
+    if (quitandoRef.current || agregandoRef.current) return;
+    const rotulo = rotuloDeIntegrante(integrante);
+    showAlert('Quitar persona', `¿Quitar a «${rotulo.nombre}» de la familia? Se había agregado por error y todavía no ingresó. Podés volver a agregarla después.`, [
+      { text: 'Cancelar', style: 'cancel' },
+      { text: 'Quitar', style: 'destructive', onPress: () => mandarQuitar(integrante) },
     ]);
   };
 
@@ -245,9 +317,10 @@ export default function EmergenciaIntegrantesScreen({
     const etiquetaA11y = [`${integrante.n}. ${titulo}`, estado.titulo, detalle, incompleta ? TEXTO_FICHA_INCOMPLETA : null].filter(Boolean).join('. ');
     const sinConfirmar = integrante.estado === 'SIN_CONFIRMAR';
     // Sin confirmar solo se confirma con el ingreso en curso; la ficha de una confirmada se abre siempre.
-    const deshabilitada = (sinConfirmar && lectura) || agregando;
+    const deshabilitada = (sinConfirmar && lectura) || agregando || quitando != null;
     const accion = sinConfirmar ? 'Confirmar persona con su ficha y su cama' : 'Ver y completar la ficha';
-    return (
+    const puedeQuitar = integrante.puede_quitarse && !lectura && integrante.id != null;
+    const cuerpo = (
       <Pressable key={String(integrante.n)} accessibilityRole="button" accessibilityLabel={etiquetaA11y}
         accessibilityHint={deshabilitada ? undefined : accion} accessibilityState={{ disabled: deshabilitada }} disabled={deshabilitada}
         onPress={() => onAbrirPersona?.(integrante, datos?.caso || casoInicial)}
@@ -259,6 +332,15 @@ export default function EmergenciaIntegrantesScreen({
         {detalle ? <Text style={ayuda}>{detalle}</Text> : null}
         {incompleta ? insignia('warning', TEXTO_FICHA_INCOMPLETA, 'ficha') : null}
       </Pressable>
+    );
+    if (!puedeQuitar) return cuerpo;
+    return (
+      <View key={`fila-${integrante.id}`} style={styles.filaConAccion}>
+        {cuerpo}
+        <CustomButton title="Quitar persona" variant="secondary" iconLeft="person-remove-outline"
+          loading={quitando === integrante.id} disabled={agregando || quitando != null || !sesion}
+          onPress={() => tocarQuitar(integrante)} />
+      </View>
     );
   };
 
@@ -284,15 +366,16 @@ export default function EmergenciaIntegrantesScreen({
         <CustomButton title="Reintentar" variant="secondary" iconLeft="refresh" disabled={!sesion} onPress={() => cargar({ silencioso: true })} />
       ) : null}
 
+      {datos && !datos.integrantes.length ? <Text style={ayuda}>{TEXTO_SIN_INTEGRANTES}</Text> : null}
       {(datos?.integrantes || []).map(fila)}
 
       {falla ? avisoDe(falla.tipo === 'reintentable' ? 'warning' : 'danger', falla.mensaje) : null}
       {datos && !lectura ? (
         <>
           <CustomButton title={reintentoAgregar ? 'Reintentar agregar persona' : 'Agregar persona'} variant="secondary"
-            iconLeft="person-add-outline" loading={agregando} disabled={agregando || !sesion} onPress={tocarAgregar} />
+            iconLeft="person-add-outline" loading={agregando} disabled={agregando || quitando != null || !sesion} onPress={tocarAgregar} />
           {cierre ? (
-            <CustomButton title={CIERRES[cierre].titulo} size="L" iconLeft={CIERRES[cierre].icono} disabled={agregando}
+            <CustomButton title={CIERRES[cierre].titulo} size="L" iconLeft={CIERRES[cierre].icono} disabled={agregando || quitando != null}
               onPress={() => onCerrar?.(cierre, datos)} />
           ) : null}
         </>
@@ -304,6 +387,7 @@ export default function EmergenciaIntegrantesScreen({
 const styles = StyleSheet.create({
   content: { padding: 16, paddingBottom: 40, gap: 10 },
   card: { borderWidth: 1, borderRadius: radii.xl, padding: 14, gap: 6 },
+  filaConAccion: { gap: 8 },
   persona: { borderWidth: 1, borderRadius: radii.xl, padding: 14, gap: 6 },
   presionada: { opacity: 0.7, transform: [{ scale: 0.98 }] },
   cabecera: { flexDirection: 'row', alignItems: 'center', gap: 8 },
