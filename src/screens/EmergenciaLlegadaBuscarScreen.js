@@ -116,8 +116,9 @@ export default function EmergenciaLlegadaBuscarScreen({
         return;
       }
       if (c.espera) {
-        const hasta = Date.now() + c.espera;
-        setAhora(Date.now());
+        const t = Date.now();
+        const hasta = t + c.espera;
+        setAhora(t);
         setEsperaHasta(hasta);
         onEspera?.(hasta);
       }

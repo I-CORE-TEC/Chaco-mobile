@@ -41,6 +41,8 @@ function loadScreen(relative, mocks, extra = {}) {
   const context = vm.createContext({console, setTimeout, clearTimeout, Date, setInterval: () => 0, clearInterval: () => {}, ...extra});
   vm.runInContext('(function(require,module,exports){' + code + '\n})', context)(
     name => {
+      // Los componentes compartidos importan './CustomButton' (relativo a components/); la pantalla, '../components/CustomButton'.
+      if (name === './CustomButton') name = '../components/CustomButton';
       // El interruptor es un componente real y compartido: se carga con los mismos mocks que la pantalla.
       if (name === '../components/InterruptorSiNo' && !mocks[name]) mocks[name] = {__esModule: true, default: loadScreen('src/components/InterruptorSiNo.js', mocks)};
       if (name === '../components/IdentidadEnConflicto' && !mocks[name]) mocks[name] = {__esModule: true, default: loadScreen('src/components/IdentidadEnConflicto.js', mocks)};
@@ -520,6 +522,26 @@ test('Puerta (A3): «Cancelar» cierra la pregunta sin mandar; (M2) el teléfono
     await ui.pressButton('Cancelar');
     assert.ok(!ui.titulos().includes('Es esa persona'));
     assert.equal(posts(ui.calls).length, 1);
+  } finally { await ui.close(); }
+});
+
+test('Puerta: con la pregunta «¿Es esa persona?» abierta y la espera del 429, sus botones quedan deshabilitados y no mandan', async () => {
+  const conflicto = {code: 'VALIDACION', detail: 'x', dni: ['Ese DNI ya está registrado como otra persona.'], persona_registrada: {apellido: 'FARIÑA', nombre: 'Joaquin'}};
+  let paso = 0;
+  const ui = await montarPuerta(() => { paso += 1; return paso === 1 ? response(400, conflicto) : response(429, {detail: 'x'}, {'Retry-After': '7'}); });
+  try {
+    await ui.llenar();
+    await ui.pressButton('Ingresar igual');
+    await ui.aceptarAlerta('Ingresar igual');
+    assert.equal(ui.button('Es esa persona').props.disabled, false, 'sin espera responde');
+    await ui.pressButton('Avisar a la mesa');
+    await ui.aceptarAlerta('Avisar a la mesa');
+    assert.equal(ui.button('Reintentar en 7 s').props.disabled, true);
+    assert.equal(ui.button('Es esa persona').props.disabled, true, 'durante la espera no se responde');
+    assert.equal(ui.button('Es otra persona').props.disabled, true);
+    const antes = posts(ui.calls).length;
+    await ui.pressButton('Es esa persona');
+    assert.equal(posts(ui.calls).length, antes, 'no manda durante la espera');
   } finally { await ui.close(); }
 });
 

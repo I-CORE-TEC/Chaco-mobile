@@ -40,6 +40,8 @@ function loadScreen(relative, mocks, timers = {}) {
     setInterval: timers.setInterval || (() => 0), clearInterval: timers.clearInterval || (() => {}), ...(timers.globals || {})});
   vm.runInContext('(function(require,module,exports){' + code + '\n})', context)(
     name => {
+      // Los componentes compartidos importan './CustomButton' (relativo a components/); la pantalla, '../components/CustomButton'.
+      if (name === './CustomButton') name = '../components/CustomButton';
       // El interruptor es un componente real y compartido: se carga con los mismos mocks que la pantalla.
       if (name === '../components/InterruptorSiNo' && !mocks[name]) mocks[name] = {__esModule: true, default: loadScreen('src/components/InterruptorSiNo.js', mocks)};
       if (name === '../components/IdentidadEnConflicto' && !mocks[name]) mocks[name] = {__esModule: true, default: loadScreen('src/components/IdentidadEnConflicto.js', mocks)};

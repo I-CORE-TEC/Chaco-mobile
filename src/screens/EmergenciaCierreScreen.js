@@ -255,8 +255,9 @@ export default function EmergenciaCierreScreen({
         return;
       }
       if (c.tipo === 'espera' && c.espera) {
-        setAhora(Date.now());
-        setEsperaHasta(Date.now() + c.espera);
+        const t = Date.now();
+        setAhora(t);
+        setEsperaHasta(t + c.espera);
       }
       setFalla(c);
     } finally {

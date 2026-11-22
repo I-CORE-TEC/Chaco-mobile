@@ -235,7 +235,7 @@ export default function EmergenciaPuertaScreen({
   // `datosEnvio`: lo que se manda; sin él, lo de la pantalla (la respuesta a «¿Es esa persona?» manda lo nuevo antes de que el estado se actualice).
   const mandar = async (cual, datosEnvio = null) => {
     const base = sesionRef.current;
-    if (enviandoRef.current || !base) return;
+    if (enviandoRef.current || !base || esperando) return;
     // Se toma antes de mirar la red (en nativo NetInfo tarda): dos toques seguidos no pasan los dos.
     enviandoRef.current = true;
     if (!await hayConexion()) {
@@ -320,8 +320,9 @@ export default function EmergenciaPuertaScreen({
         return;
       }
       if (c.tipo === 'espera' && c.espera) {
-        setAhora(Date.now());
-        setEsperaHasta(Date.now() + c.espera);
+        const t = Date.now();
+        setAhora(t);
+        setEsperaHasta(t + c.espera);
       }
       setFalla(c);
     } finally {
@@ -482,7 +483,7 @@ export default function EmergenciaPuertaScreen({
         <Text style={ayuda}>{TEXTO_DNI_FIJO}</Text>
         {errorCampo(['dni'])}
         {personaEnConflicto(erroresServidor) ? (
-          <IdentidadEnConflicto persona={personaEnConflicto(erroresServidor)} deshabilitado={enviando || !sesion}
+          <IdentidadEnConflicto persona={personaEnConflicto(erroresServidor)} deshabilitado={enviando || !sesion || esperando}
             onMisma={() => decidirIdentidad('misma')} onOtra={() => decidirIdentidad('otra')} onCancelar={sinPersonaRegistrada} />
         ) : null}
         {/* Solo para la pantalla (no viaja): con «Masculino» no se ofrece «Embarazo» para el responsable. */}

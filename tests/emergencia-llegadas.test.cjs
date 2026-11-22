@@ -509,6 +509,13 @@ test('M1: la derivación y la persona conservan identidad_a_revisar; sin ella, n
   assert.match(l.textoIdentidadARevisar(aRevisar), /Gómez, Pedro/);
 });
 
+test('erroresDeLlegada: un persona_registrada objeto en un endpoint que no lo tiene entre sus campos no rompe ni va a generales', async () => {
+  const r = await setup();
+  const l = r.load('./emergenciaLlegadas');
+  const payload = {code: 'VALIDACION', dni: ['Mal.'], persona_registrada: {apellido: 'FARIÑA', nombre: 'Joaquin'}};
+  igual(l.erroresDeLlegada(payload, ['dni']), {dni: ['Mal.']});
+});
+
 test('A3: el 400 persona_registrada de la puerta llega a la pantalla como persona y no como mensaje general', async () => {
   const r = await setup();
   const l = r.load('./emergenciaLlegadas');

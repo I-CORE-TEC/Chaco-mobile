@@ -320,7 +320,7 @@ export const erroresDeLlegada = (payload, campos = []) => {
   const errores = {};
   Object.entries(erroresDelServidor(payload)).forEach(([clave, mensajes]) => {
     if (campos.includes(clave)) errores[clave] = mensajes;
-    else errores.generales = [...(errores.generales || []), ...mensajes];
+    else if (Array.isArray(mensajes)) errores.generales = [...(errores.generales || []), ...mensajes];
   });
   return errores;
 };

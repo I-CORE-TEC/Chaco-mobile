@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import CustomButton from '../components/CustomButton';
+import CustomButton from './CustomButton';
 import { useTheme } from '../context/ThemeContext';
 import { statusTones } from '../theme/statusBadges';
 import { fontSizes, radii } from '../theme';
