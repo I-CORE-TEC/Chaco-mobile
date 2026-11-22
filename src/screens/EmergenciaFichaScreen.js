@@ -10,7 +10,7 @@ import { useToast } from '../context/ToastContext';
 import {
   TEXTO_SIN_RED, abrirSesion, borrarBorradorFicha, camasElegibles, cargarCamas, cargarPersona, clasificarErrorLlegada,
   completarFicha, confirmarPendiente, confirmarPersona, escucharRed, estadoDeCama, estadoDeIntegrante, guardarBorradorFicha,
-  hayConexion, leerBorradorFicha, olvidarConfirmarPendiente, revisarCama, buscarCama, esSoloLectura, camaPorDefecto, rotuloDeIntegrante,
+  hayConexion, leerBorradorFicha, adultosParaElegir, olvidarConfirmarPendiente, revisarCama, buscarCama, esSoloLectura, camaPorDefecto, rotuloDeIntegrante,
   textoIdentidadARevisar,
 } from '../services/emergenciaLlegadas';
 import {
@@ -56,10 +56,13 @@ const CAMPOS_OPCIONALES = {
 // - `onConflicto(clasificacion)`: 409 → el padre recarga por `estado_actual` (§13.1).
 // - `onNoEncontrado()`: 404 (la persona o el caso ya no). `onSinModulo(mensaje)`: 403.
 // - `onEnviando(bool)`: hay un envío en curso (el padre oculta «volver»).
+// - `onCambios(bool)`: hay algo cargado sin mandar (el padre pide confirmar antes de salir con Atrás).
+// - `integrantes`: los de la familia (con `es_adulto`, Cambio 553): el adulto responsable se elige entre los
+//   adultos; sin ninguno queda el texto libre.
 // `recarga` cambia con el botón de sincronizar del Banner: en «confirmar» vuelve a pedir el mapa de
 // camas; en «completar» vuelve a leer a la persona, con lo tocado puesto encima (como un borrador).
 export default function EmergenciaFichaScreen({
-  caso, n, dispositivo, recarga = 0, onTerminar, onConflicto, onNoEncontrado, onSinModulo, onEnviando,
+  caso, n, dispositivo, integrantes = [], recarga = 0, onTerminar, onConflicto, onNoEncontrado, onSinModulo, onEnviando, onCambios,
 }) {
   const { theme, typography } = useTheme();
   const { showAlert, showToast } = useToast();
@@ -97,6 +100,9 @@ export default function EmergenciaFichaScreen({
   const pedidoMapa = useRef(0);
   const recargaInicial = useRef(recarga);
   const casoId = caso?.id;
+  const cambiosRef = useRef(onCambios);
+  cambiosRef.current = onCambios;
+  const avisarCambios = (valor) => { try { cambiosRef.current?.(valor); } catch { /* Solo informa. */ } };
 
   const modo = persona ? (persona.estado === 'SIN_CONFIRMAR' ? 'confirmar' : 'completar') : null;
   // Sin confirmar con la familia ya alojada o cerrada no se puede confirmar; confirmada con el caso
@@ -107,6 +113,7 @@ export default function EmergenciaFichaScreen({
   // no se vuelve a guardar al desmontar.
   const abandonar = () => {
     terminado.current = true;
+    avisarCambios(false);
     ultimo.current = null;
     if (sesionRef.current) borrarBorradorFicha(sesionRef.current, casoId, n).catch(() => {});
   };
@@ -194,6 +201,7 @@ export default function EmergenciaFichaScreen({
       setSinRed(false);
       if (borrador && !enMemoria) {
         tocado.current = true;
+        avisarCambios(true);
         setRecuperado(true);
         showToast({ type: 'info', message: TEXTO_BORRADOR });
       }
@@ -214,6 +222,7 @@ export default function EmergenciaFichaScreen({
 
   useEffect(() => {
     montado.current = true;
+    avisarCambios(false);
     (async () => {
       try {
         const abierta = await abrirSesion();
@@ -266,6 +275,7 @@ export default function EmergenciaFichaScreen({
   const cambiar = (cambios) => {
     if (lectura || enviandoRef.current) return;
     tocado.current = true;
+    avisarCambios(true);
     setPlano((prev) => limpiarCondicionales({ ...prev, ...cambios }));
     setErroresServidor((prev) => {
       const claves = Object.keys(cambios);
@@ -278,6 +288,7 @@ export default function EmergenciaFichaScreen({
   const elegirCama = (plaza) => {
     if (lectura || enviandoRef.current || !plaza?.elegible) return;
     tocado.current = true;
+    avisarCambios(true);
     setPlazaId(plaza.id);
     setErroresServidor((prev) => {
       if (!prev.plaza) return prev;
@@ -302,6 +313,7 @@ export default function EmergenciaFichaScreen({
       onPress: async () => {
         ultimo.current = null;
         tocado.current = false;
+        avisarCambios(false);
         await borrarBorradorFicha(sesionRef.current, casoId, n).catch(() => {});
         if (!montado.current) return;
         setPlano(fichaAPlano(personaRef.current?.ficha));
@@ -528,6 +540,31 @@ export default function EmergenciaFichaScreen({
   const adultoArriba = modo === 'confirmar' && (menor || errorDe('adulto_responsable').length > 0);
   const elegida = buscarCama(mapa, plazaId);
   const elegibles = camasElegibles(mapa);
+  const adultos = adultosParaElegir(integrantes, n);
+  const elegirAdulto = (adulto) => cambiar(String(plano.adulto_responsable_orden) === String(adulto.n)
+    ? { adulto_responsable_orden: null, adulto_responsable: null }
+    : { adulto_responsable_orden: String(adulto.n), adulto_responsable: adulto.nombre });
+  // El adulto responsable: entre los adultos confirmados de la familia; sin ninguno, texto libre (Cambio 527).
+  const campoAdulto = ({ obligatorio = false, placeholder } = {}) => (adultos.length ? (
+    <View key="adulto_responsable" style={styles.pregunta}>
+      <Text style={etiqueta}>{`Adulto responsable${obligatorio ? ' *' : ''}`}</Text>
+      {plano.adulto_responsable && !plano.adulto_responsable_orden ? <Text style={ayuda}>{`Cargado: ${plano.adulto_responsable}`}</Text> : null}
+      <View style={styles.opciones} accessibilityRole="radiogroup" accessibilityLabel="Adulto responsable">
+        {adultos.map((adulto) => {
+          const marcado = String(plano.adulto_responsable_orden) === String(adulto.n);
+          return (
+            <Pressable key={String(adulto.n)} accessibilityRole="radio" accessibilityState={{ selected: marcado, checked: marcado, disabled: fijo }}
+              accessibilityLabel={`Adulto responsable: ${adulto.nombre}`} disabled={fijo} onPress={() => elegirAdulto(adulto)}
+              style={[styles.opcion, { borderColor: marcado ? theme.colors.primary : theme.colors.border,
+                backgroundColor: marcado ? `${theme.colors.primary}18` : theme.colors.surface }]}>
+              <Text style={{ color: marcado ? theme.colors.primary : theme.colors.text, fontFamily: marcado ? typography.bold : typography.medium, fontSize: fontSizes.sm }}>{adulto.nombre}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+      {errorCampo('adulto_responsable', 'adulto_responsable_orden')}
+    </View>
+  ) : texto('adulto_responsable', 'Adulto responsable', { obligatorio, placeholder }));
   const faltan = seccionesIncompletas(plano);
   const listado = listaDeErroresFicha(errores);
 
@@ -548,7 +585,8 @@ export default function EmergenciaFichaScreen({
           );
         }
         if (tipo === 'siNo') return siNo(campo, extra);
-        return texto(campo, extra, { area: tipo === 'area', obligatorio: campo === 'adulto_responsable' && menor });
+        if (campo === 'adulto_responsable') return campoAdulto({ obligatorio: menor });
+        return texto(campo, extra, { area: tipo === 'area', obligatorio: false });
       })}
     </View>
   );
@@ -557,7 +595,7 @@ export default function EmergenciaFichaScreen({
     <View style={styles.mapa}>
       {(mapa?.sectores || []).map(({ sector, plazas, total, libres, reservadas_familia: reservadas }) => (
         <View key={String(sector.id)} style={styles.sector}>
-          <Text accessibilityRole="header" style={etiqueta}>{[sector.nombre, sector.perfil].filter(Boolean).join(' · ')}</Text>
+          <Text accessibilityRole="header" style={etiqueta}>{[sector.edificio?.nombre, sector.nombre, sector.perfil].filter(Boolean).join(' · ')}</Text>
           <Text style={ayuda}>{`${libres === 1 ? '1 libre' : `${libres} libres`} de ${total}${reservadas ? ` · ${reservadas === 1 ? '1 guardada' : `${reservadas} guardadas`} para esta familia` : ''}`}</Text>
           {plazas.length < total ? <Text style={ayuda}>{`Se muestran ${plazas.length} de ${total} camas.`}</Text> : null}
           <View style={styles.opciones} accessibilityRole="radiogroup" accessibilityLabel={`Camas de ${sector.nombre}`}>
@@ -669,7 +707,7 @@ export default function EmergenciaFichaScreen({
                 {clave === 'alergias_graves' && plano.alergias_graves === true ? texto('alergias_graves_detalle', 'Detalle de las alergias') : null}
               </React.Fragment>
             ))}
-            {adultoArriba ? texto('adulto_responsable', 'Adulto responsable', { obligatorio: true, placeholder: 'Es menor de 16 años' }) : null}
+            {adultoArriba ? campoAdulto({ obligatorio: true, placeholder: 'Es menor de 16 años' }) : null}
           </View>
 
           {!lectura ? (

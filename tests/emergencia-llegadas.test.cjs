@@ -527,3 +527,43 @@ test('A3: el 400 persona_registrada de la puerta llega a la pantalla como person
   assert.ok(!l.validarPuerta({traslado: 'BOMBEROS', dni: '30111222', adultos_f: 1, es_misma_persona: true}).nombre);
   assert.ok(l.validarPuerta({traslado: 'BOMBEROS', dni: '30111222', adultos_f: 1, telefono: '12'}).telefono, 'M2: teléfono también en la puerta');
 });
+
+test('Cambio 553: normaliza es_adulto, el edificio (derivación y sector del mapa) y las claves nuevas de la búsqueda; sin ellas, neutros', async () => {
+  const {l} = await preparar();
+  const conEdificio = l.normalizarBusqueda({...BUSQUEDA, derivacion: {...DERIVACION, edificio: {id: 4, nombre: 'Edificio Norte'}}});
+  igual(conEdificio.derivacion.edificio, {id: 4, nombre: 'Edificio Norte'});
+  igual([conEdificio.derivada_a_otro_edificio, conEdificio.edificio_derivado], [false, null]);
+  igual(l.normalizarBusqueda(BUSQUEDA).derivacion.edificio, null, 'sin la clave (back anterior) es null');
+  igual(l.normalizarBusqueda({...BUSQUEDA, derivacion: {...DERIVACION, edificio: null}}).derivacion.edificio, null);
+  igual(l.normalizarBusqueda({...BUSQUEDA, derivacion: {...DERIVACION, edificio: {id: 4, nombre: ' '}}}).derivacion.edificio, null);
+  const otro = l.normalizarBusqueda({resultado: 'SIN_DERIVACION', dni: '30111222', plazas_libres: 3, mensaje: 'La familia ya está derivada a el edificio Sur de este dispositivo.',
+    derivacion: null, puede_ingresar_igual: false, puede_avisar_a_la_mesa: false, derivada_a_otro_edificio: true, edificio_derivado: {id: 5, nombre: 'Sur'}});
+  igual([otro.derivada_a_otro_edificio, otro.edificio_derivado], [true, {id: 5, nombre: 'Sur'}]);
+  assert.equal(l.pasoDeBusqueda(otro), 'sin_derivacion', 'el resultado sigue siendo SIN_DERIVACION');
+  igual(l.accionesSinDerivacion(otro), {ingresar: false, avisar: false});
+  igual(l.accionesSinDerivacion({...otro, puede_ingresar_igual: true, puede_avisar_a_la_mesa: true}), {ingresar: false, avisar: false},
+    'aunque el back mandara las banderas en true, con otro edificio no se ofrece nada');
+  igual(l.accionesSinDerivacion({...otro, derivada_a_otro_edificio: false, puede_ingresar_igual: true, puede_avisar_a_la_mesa: true}), {ingresar: true, avisar: true});
+  assert.equal(l.textoDerivadaAOtroEdificio(otro), otro.mensaje, 'se muestra el mensaje del back');
+  assert.equal(l.textoDerivadaAOtroEdificio({...otro, mensaje: ''}), 'La familia ya está derivada a el edificio Sur de este dispositivo.');
+  assert.equal(l.textoDerivadaAOtroEdificio({mensaje: '', edificio_derivado: null}), 'La familia ya está derivada a otro edificio de este dispositivo.');
+  const d = l.normalizarIntegrantes({...INTEGRANTES, integrantes: [FILA(1, {es_adulto: true}), FILA(2), FILA(3, {es_adulto: 'si'}), FILA(4, {es_adulto: false})]});
+  igual(d.integrantes.map(i => i.es_adulto), [true, false, false, false], 'solo `true` cuenta; un back anterior no la manda');
+  const mapa = l.normalizarMapa({caso: 184, sectores: [
+    {sector: {id: 3, nombre: 'A', perfil: '', edificio: {id: 4, nombre: 'Norte'}}, plazas: [], total: 0, libres: 0},
+    {sector: {id: 4, nombre: 'B', edificio: null}, plazas: [], total: 0, libres: 0},
+    {sector: {id: 5, nombre: 'C'}, plazas: [], total: 0, libres: 0}]});
+  igual(mapa.sectores.map(s => s.sector.edificio), [{id: 4, nombre: 'Norte'}, null, null]);
+});
+
+test('Cambio 553: el selector del adulto responsable ofrece solo a los adultos, sin la propia persona, con su nombre', async () => {
+  const {l} = await preparar();
+  const confirmada = (n, nombre, extra = {}) => FILA(n, {estado: 'CONFIRMADA', persona: {id: 100 + n, nombre, dni: `3011122${n}`}, es_adulto: true, ...extra});
+  const d = l.normalizarIntegrantes({...INTEGRANTES, integrantes: [confirmada(1, 'Benítez, Rosa'), confirmada(2, 'Benítez, Juan', {es_adulto: false}),
+    confirmada(3, 'Benítez, Ana'), FILA(4), FILA(5, {responsable: {id: 9, nombre: 'Pérez, Luis', dni: '1'}, es_adulto: true})]});
+  igual(l.adultosParaElegir(d.integrantes, 3), [{n: 1, nombre: 'Benítez, Rosa'}, {n: 5, nombre: 'Pérez, Luis (responsable)'}]);
+  igual(l.adultosParaElegir(d.integrantes, 2), [{n: 1, nombre: 'Benítez, Rosa'}, {n: 3, nombre: 'Benítez, Ana'}, {n: 5, nombre: 'Pérez, Luis (responsable)'}]);
+  igual(l.adultosParaElegir([], 2), []);
+  igual(l.adultosParaElegir(null, 2), []);
+  igual(l.adultosParaElegir(l.normalizarIntegrantes({...INTEGRANTES, integrantes: [FILA(1), FILA(2)]}).integrantes, 2), [], 'sin adultos: texto libre');
+});

@@ -6,7 +6,7 @@ import CustomButton from '../components/CustomButton';
 import { useTheme } from '../context/ThemeContext';
 import {
   TEXTO_SIN_RED, abrirSesion, buscar, clasificarErrorLlegada, escucharRed, hayConexion, pasoDeBusqueda,
-  accionesSinDerivacion,
+  accionesSinDerivacion, textoDerivadaAOtroEdificio,
 } from '../services/emergenciaLlegadas';
 import { cleanDigits } from '../utils/dni';
 import { formatDate } from '../utils/dates';
@@ -173,6 +173,8 @@ export default function EmergenciaLlegadaBuscarScreen({
   const paso = resultado ? pasoDeBusqueda(resultado) : null;
   const camas = resultado?.plazas_libres ?? 0;
   const acciones = accionesSinDerivacion(resultado);
+  // Cambio 553: derivada a otro edificio del dispositivo; el mensaje del back nombra el edificio.
+  const otroEdificio = resultado?.derivada_a_otro_edificio === true;
 
   return (
     <ScrollView style={{ flex: 1, backgroundColor: theme.colors.background }} contentContainerStyle={styles.content}
@@ -200,8 +202,10 @@ export default function EmergenciaLlegadaBuscarScreen({
       {paso === 'sin_derivacion' ? (
         <View style={tarjeta}>
           <Text accessibilityRole="header" style={[styles.titulo, { color: theme.colors.text, fontFamily: typography.bold }]}>Sin derivación</Text>
-          {avisoDe('info', resultado.mensaje || 'No hay una derivación para este DNI en tu dispositivo.')}
-          <Text style={ayuda}>{camas === 1 ? '1 cama libre en este dispositivo' : `${camas || 'Sin'} camas libres en este dispositivo`}</Text>
+          {otroEdificio
+            ? avisoDe('warning', textoDerivadaAOtroEdificio(resultado), 'business-outline')
+            : avisoDe('info', resultado.mensaje || 'No hay una derivación para este DNI en tu dispositivo.')}
+          {otroEdificio ? null : <Text style={ayuda}>{camas === 1 ? '1 cama libre en este dispositivo' : `${camas || 'Sin'} camas libres en este dispositivo`}</Text>}
           {acciones.ingresar ? (
             <CustomButton title="Ingresar igual" variant="secondary" iconLeft="enter-outline" disabled={sinRed}
               onPress={() => onSinDerivacion?.('ingresar', resultado)} />
@@ -210,7 +214,7 @@ export default function EmergenciaLlegadaBuscarScreen({
             <CustomButton title="Avisar a la mesa" variant="secondary" iconLeft="megaphone-outline" disabled={sinRed}
               onPress={() => onSinDerivacion?.('avisar', resultado)} />
           ) : null}
-          {!acciones.ingresar && !acciones.avisar ? <Text style={ayuda}>{TEXTO_SIN_ACCIONES}</Text> : null}
+          {!acciones.ingresar && !acciones.avisar && !otroEdificio ? <Text style={ayuda}>{TEXTO_SIN_ACCIONES}</Text> : null}
         </View>
       ) : null}
 

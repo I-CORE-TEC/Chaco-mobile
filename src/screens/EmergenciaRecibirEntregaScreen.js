@@ -36,8 +36,9 @@ const sinVacios = (objeto) => Object.fromEntries(Object.entries(objeto || {}).fi
 // `onTerminar(motivo, detalle)`: 'recibida' (con el resultado), 'conflicto' (409 de estado: recargar
 // las entregas) o 'no_encontrada' (404: recargar los dispositivos). `onSinModulo(mensaje)`: 403.
 // `onEnviando(bool)`: hay un envío en curso (el padre no deja salir mientras tanto). El resultado
-// llega al padre aunque la pantalla ya no esté.
-export default function EmergenciaRecibirEntregaScreen({ entrega, dispositivoId = null, onTerminar, onSinModulo, onEnviando }) {
+// llega al padre aunque la pantalla ya no esté. `onCambios(bool)`: hay algo cargado sin mandar (otra cantidad
+// que la enviada, una observación o la foto del remito): el padre pide confirmar antes de salir con Atrás.
+export default function EmergenciaRecibirEntregaScreen({ entrega, dispositivoId = null, onTerminar, onSinModulo, onEnviando, onCambios }) {
   const { theme, typography } = useTheme();
   const { showToast, showAlert } = useToast();
   const [recepcion, setRecepcion] = useState(null);
@@ -106,6 +107,11 @@ export default function EmergenciaRecibirEntregaScreen({ entrega, dispositivoId 
     }, AUTOGUARDADO_MS);
     return () => clearTimeout(timer);
   }, [cantidades, observacion, recepcion]);
+
+  const hayCambios = !!remito || observacion.trim() !== '' || diferenciasDe(entrega, cantidades).length > 0;
+  useEffect(() => {
+    try { onCambios?.(hayCambios); } catch { /* Solo informa. */ }
+  }, [hayCambios]);
 
   // Cuenta regresiva del Retry-After.
   const esperando = esperaHasta > ahora;

@@ -89,6 +89,9 @@ export const ESQUEMA_FICHA = {
     observaciones: [TEXTO, 1000],
     mascotas: [BOOLEANO, null],
     adulto_responsable: [TEXTO, 200],
+    // Cambio 527/553: el `n` del integrante elegido en el selector de adultos. El back copia su nombre en
+    // `adulto_responsable`; sin adultos confirmados en el grupo no se manda y queda el texto libre.
+    adulto_responsable_orden: [TEXTO, 3],
   },
 };
 
@@ -143,6 +146,7 @@ export const ETIQUETAS_FICHA = {
   observaciones: 'Observaciones',
   mascotas: 'Mascotas',
   adulto_responsable: 'Adulto responsable',
+  adulto_responsable_orden: 'Adulto responsable',
   plaza: 'Cama',
   orden: 'Persona',
   ...Object.fromEntries(PREGUNTAS_CRITICAS.map(({ clave, titulo }) => [clave, titulo])),

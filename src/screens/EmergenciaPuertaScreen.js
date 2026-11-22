@@ -64,10 +64,13 @@ const ACCIONES = {
 // del DNI anterior sin reintentar). Si lo cargado ya se borró del teléfono (logout, 48 h) y queda solo el
 // uuid, se ofrece «Reintentar» con el uuid solo; si el servidor dice que no había llegado, se carga de nuevo.
 // - `onNoEncontrado()`: 404. `onSinModulo(mensaje)`: 403. `onEnviando(bool)`: hay un envío en curso.
+// - `onCambios(bool)`: hay algo cargado sin mandar (el padre pide confirmar antes de salir con Atrás).
+// «Avisar a la mesa» puede contestar 400 sin campo (Cambio 553: la familia ya tiene una derivación en curso a
+// otro edificio de este dispositivo): se muestra el mensaje del back y el botón queda apagado; no se reintenta.
 export default function EmergenciaPuertaScreen({
   dispositivo, dni = '', plazasLibres = 0, accion: accionInicial = 'ingresar', mensaje = '',
   puedeIngresarIgual = null, puedeAvisarALaMesa = null,
-  onIngresado, onAvisado, onNoEncontrado, onSinModulo, onEnviando,
+  onIngresado, onAvisado, onNoEncontrado, onSinModulo, onEnviando, onCambios,
 }) {
   const { theme, typography } = useTheme();
   const { showAlert, showToast } = useToast();
@@ -88,6 +91,8 @@ export default function EmergenciaPuertaScreen({
   const [ahora, setAhora] = useState(Date.now());
   const [consultando, setConsultando] = useState('');
   const [avisoConsulta, setAvisoConsulta] = useState(null);
+  const [tocado, setTocado] = useState(false);
+  const [avisoRechazado, setAvisoRechazado] = useState(false);
   const montado = useRef(true);
   const enviandoRef = useRef(false);
   const sesionRef = useRef(null);
@@ -137,6 +142,12 @@ export default function EmergenciaPuertaScreen({
     };
   }, [dispositivo?.id, dni]);
 
+  // Lo que la guardia cargó (no lo que completó la búsqueda sola) o un envío sin resultado.
+  const hayCambios = tocado || !!pendiente;
+  useEffect(() => {
+    try { onCambios?.(hayCambios); } catch { /* Solo informa. */ }
+  }, [hayCambios]);
+
   const esperando = esperaHasta > ahora;
   useEffect(() => {
     if (!esperando) return undefined;
@@ -156,6 +167,7 @@ export default function EmergenciaPuertaScreen({
   fijoRef.current = fijo;
   const cambiar = (cambios) => {
     if (fijo) return;
+    setTocado(true);
     setDatos((prev) => {
       const next = { ...prev, ...cambios };
       return prev.es_misma_persona === true && ('nombre' in cambios || 'apellido' in cambios) ? sinRespuestaDeIdentidad(next) : next;
@@ -314,6 +326,8 @@ export default function EmergenciaPuertaScreen({
           setSinCamas(true);
           if (puedeAvisarALaMesa !== false) setAccion('avisar');
         }
+        // 400 de «Avisar a la mesa» sin ningún campo: lo rechazó el servidor por la derivación en curso. Definitivo.
+        if (cual === 'avisar' && !plazas?.length && generales?.length && !Object.keys(campos).length) setAvisoRechazado(true);
         const generalesYPlazas = [...(plazas || []), ...(generales || [])];
         if (generalesYPlazas.length) setFalla({ tipo: 'rechazo', mensaje: generalesYPlazas.join('\n') });
         else showToast({ type: 'warning', message: 'El servidor rechazó algunos datos. Corregí lo marcado y volvé a mandar.' });
@@ -346,6 +360,7 @@ export default function EmergenciaPuertaScreen({
 
   const tocar = (cual) => {
     if (enviandoRef.current || esperando) return;
+    if (cual === 'avisar' && avisoRechazado) return;
     if (sinDatos && pendiente === cual) {
       mandar(cual);
       return;
@@ -421,7 +436,7 @@ export default function EmergenciaPuertaScreen({
   const topes = topesAsistencia(datos);
   const ocultos = textoDeOcultos(visible);
   const puedeIngresar = pendiente === 'ingresar' || (!sinCamas && puedeIngresarIgual !== false);
-  const puedeAvisar = pendiente === 'avisar' || puedeAvisarALaMesa !== false;
+  const puedeAvisar = pendiente === 'avisar' || (puedeAvisarALaMesa !== false && !avisoRechazado);
   const segundos = Math.max(1, Math.ceil((esperaHasta - ahora) / 1000));
   const listado = intentado ? listaDeErrores(errores) : [];
   const botonDe = (cual, principal) => {
@@ -430,7 +445,7 @@ export default function EmergenciaPuertaScreen({
     return (
       <CustomButton key={cual} title={titulo} size={principal ? 'L' : undefined} variant={principal ? undefined : 'secondary'}
         iconLeft={pendiente === cual ? 'refresh' : ACCIONES[cual].icono} loading={enviando && principal}
-        disabled={enviando || !sesion || esperando} onPress={() => tocar(cual)} />
+        disabled={enviando || !sesion || esperando || (cual === 'avisar' && avisoRechazado)} onPress={() => tocar(cual)} />
     );
   };
   const otra = accion === 'ingresar' ? 'avisar' : 'ingresar';

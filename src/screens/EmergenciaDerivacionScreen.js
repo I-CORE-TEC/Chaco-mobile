@@ -224,6 +224,7 @@ export default function EmergenciaDerivacionScreen({
         {derivacion.vencida ? avisoDe('warning', TEXTO_VENCIDA, 'time-outline') : null}
         {dato('Responsable', nombreDelResponsable(derivacion.responsable))}
         {derivacion.responsable?.identidad_a_revisar ? avisoDe('warning', textoIdentidadARevisar(derivacion.responsable.identidad_a_revisar), 'alert-circle-outline') : null}
+        {dato('Edificio', derivacion.edificio?.nombre)}
         {dato('Camas pedidas', `${derivacion.plazas_pedidas}${caso?.total_declarado ? ` · ${caso.total_declarado} personas declaradas` : ''}`)}
         {libres != null ? <Text style={ayuda}>{libres === 1 ? '1 cama libre en este dispositivo' : `${libres || 'Sin'} camas libres en este dispositivo`}</Text> : null}
         {dato('Derivada', [derivacion.derivada_por, derivacion.derivada_en ? formatDate(derivacion.derivada_en, { includeTime: true }) : null].filter(Boolean).join(' · '))}
