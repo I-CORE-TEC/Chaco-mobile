@@ -735,7 +735,8 @@ async function montarApp({pendientes = 0, resumen = null, enCurso = null, sync =
     '@react-native-community/netinfo': {__esModule: true, default: {addEventListener: (fn) => { llamadas.netinfo = fn; return () => { llamadas.desuscripto += 1; }; }}},
     '../context/AuthContext': {useAuth: () => ({user: {nombre: 'Ana'}, logout() { llamadas.logout += 1; }})},
     '../components/Banner': {__esModule: true, default: 'Banner'},
-    '../components/SettingsPanel': {__esModule: true, default: 'SettingsPanel'},
+    '../components/BottomNav': {__esModule: true, default: 'BottomNav'},
+    '../screens/CuentaScreen': {__esModule: true, default: 'CuentaScreen'},
     '../hooks/useBotonAtras': {__esModule: true, default: (opciones) => { pantallas.atras = opciones; }},
     '../screens/EmergenciaInicioScreen': {__esModule: true, default: capturar('inicio')},
     '../screens/EmergenciaMisEnviosScreen': {__esModule: true, default: capturar('envios')},
@@ -916,7 +917,8 @@ test('EmergenciaApp M3: el botón de sincronizar recarga las listas de kits, sin
 test('EmergenciaApp: cerrar sesión con familias sin entregar avisa antes de salir', async () => {
   const ui = await montarApp({pendientes: 3});
   try {
-    await renderer.act(async () => { await ui.tree.root.findByType('SettingsPanel').props.onLogout(); });
+    await renderer.act(async () => { ui.tree.root.findByType('BottomNav').props.onTabPress('cuenta'); });
+    await renderer.act(async () => { await ui.tree.root.findByType('CuentaScreen').props.onLogout(); });
     assert.equal(ui.llamadas.logout, 0);
     const [titulo, mensaje, opciones] = ui.alerts.at(-1);
     assert.equal(titulo, 'Cerrar sesión');
@@ -926,7 +928,8 @@ test('EmergenciaApp: cerrar sesión con familias sin entregar avisa antes de sal
   } finally { await ui.close(); }
   const sinNada = await montarApp({pendientes: 0});
   try {
-    await renderer.act(async () => { await sinNada.tree.root.findByType('SettingsPanel').props.onLogout(); });
+    await renderer.act(async () => { sinNada.tree.root.findByType('BottomNav').props.onTabPress('cuenta'); });
+    await renderer.act(async () => { await sinNada.tree.root.findByType('CuentaScreen').props.onLogout(); });
     assert.equal(sinNada.llamadas.logout, 1);
   } finally { await sinNada.close(); }
 });
@@ -1079,7 +1082,8 @@ test('aviso de salida: separa en cola, para revisar y sin terminar, con plurales
 test('EmergenciaApp: cerrar sesión con solo un formulario sin terminar también avisa', async () => {
   const ui = await montarApp({resumen: {enCola: 0, paraRevisar: 1, sinTerminar: 1}});
   try {
-    await renderer.act(async () => { await ui.tree.root.findByType('SettingsPanel').props.onLogout(); });
+    await renderer.act(async () => { ui.tree.root.findByType('BottomNav').props.onTabPress('cuenta'); });
+    await renderer.act(async () => { await ui.tree.root.findByType('CuentaScreen').props.onLogout(); });
     assert.equal(ui.llamadas.logout, 0);
     const [, mensaje] = ui.alerts.at(-1);
     assert.ok(mensaje.includes('1 envío para revisar') && mensaje.includes('Un formulario sin terminar'));
@@ -1220,5 +1224,44 @@ test('EmergenciaApp (Atrás): Recibir entrega frena mientras se manda y pide con
     await hacer(() => ui.pantallas.atras.alAtras());
     assert.equal(ui.alerts.length, antes, 'lo cargado en la entrega anterior no se arrastra');
     assert.equal(banner().props.title, 'Club');
+  } finally { await ui.close(); }
+});
+
+test('EmergenciaApp (barra inferior): Inicio y Cuenta; la barra respeta la misma guarda que Atrás', async () => {
+  const ui = await montarApp();
+  const banner = () => ui.tree.root.findByType('Banner');
+  const barra = () => ui.tree.root.findByType('BottomNav').props;
+  const hacer = fn => renderer.act(async () => { await fn(); });
+  try {
+    assert.deepEqual([...barra().items.map(i => i.id)], ['inicio', 'cuenta']);
+    assert.equal(barra().activeTab, 'inicio');
+    await hacer(() => ui.pantallas.inicio.onAbrir({clave: 'kits', titulo: 'Recepción de kits'}));
+    await hacer(() => ui.pantallas.kitsDispositivos.onElegir({id: 7, nombre: 'Club'}, {unico: false}));
+    await hacer(() => ui.pantallas.kitsEntregas.onAbrir({id: 31, numero: 'K-31', lineas: []}));
+    // Mandando: la barra no cambia de pestaña.
+    await hacer(() => ui.pantallas.kitsRecibir.onEnviando(true));
+    await hacer(() => barra().onTabPress('cuenta'));
+    assert.equal(ui.toasts.at(-1).message, 'Se está enviando. Esperá un momento.');
+    assert.equal(banner().props.title, 'Recibir entrega');
+    assert.equal(barra().activeTab, 'inicio');
+    await hacer(() => ui.pantallas.kitsRecibir.onEnviando(false));
+    // Con algo cargado: pide confirmar; «Salir» pasa a Cuenta.
+    await hacer(() => ui.pantallas.kitsRecibir.onCambios(true));
+    await hacer(() => barra().onTabPress('cuenta'));
+    const alerta = ui.alerts.at(-1);
+    assert.equal(alerta[0], '¿Salir sin enviar?');
+    assert.equal(barra().activeTab, 'inicio');
+    await hacer(() => alerta[2][1].onPress());
+    assert.equal(barra().activeTab, 'cuenta');
+    assert.equal(banner().props.title, 'Cuenta');
+    assert.ok(ui.tree.root.findByType('CuentaScreen'));
+    // Atrás desde Cuenta vuelve a Inicio; Inicio desde otra pantalla va al inicio del módulo.
+    assert.equal(ui.pantallas.atras.activo, true);
+    await hacer(() => ui.pantallas.atras.alAtras());
+    assert.equal(barra().activeTab, 'inicio');
+    assert.equal(banner().props.title, 'Hola, Ana');
+    await hacer(() => ui.pantallas.inicio.onAbrir({clave: 'kits', titulo: 'Recepción de kits'}));
+    await hacer(() => barra().onTabPress('inicio'));
+    assert.equal(banner().props.title, 'Hola, Ana');
   } finally { await ui.close(); }
 });

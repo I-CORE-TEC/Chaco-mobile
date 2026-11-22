@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, StyleSheet } from 'react-native';
+import { View } from 'react-native';
 import { escucharReconexion } from '../services/conectividad';
 import { repetirMientrasActiva } from '../services/sincronizacionPeriodica';
 import { useAuth } from '../context/AuthContext';
@@ -7,14 +7,20 @@ import { useTheme } from '../context/ThemeContext';
 import { useToast } from '../context/ToastContext';
 import useBotonAtras from '../hooks/useBotonAtras';
 import Banner from '../components/Banner';
-import CustomButton from '../components/CustomButton';
-import SettingsPanel from '../components/SettingsPanel';
+import BottomNav from '../components/BottomNav';
+import CuentaScreen from '../screens/CuentaScreen';
 import DispositivosListaScreen from '../screens/DispositivosListaScreen';
 import DispositivoDetalleScreen from '../screens/DispositivoDetalleScreen';
 import DispositivoCompletarScreen from '../screens/DispositivoCompletarScreen';
 import { getPendingCount, syncPendientes, reintentarFallidas } from '../services/dispositivosService';
 
 const RECONNECT_DELAY_MS = 1800;
+
+// Entradas de la barra inferior de Dispositivos (la misma lista para todos los roles del módulo).
+const PESTANAS = [
+  { id: 'inicio', label: 'Inicio', icon: 'home-outline', activeIcon: 'home' },
+  { id: 'cuenta', label: 'Cuenta', icon: 'person-circle-outline', activeIcon: 'person-circle' },
+];
 
 // Módulo Dispositivos: lista -> detalle -> completar. No importa nada de Becas: comparte solo
 // sesión, tema y componentes genéricos. Se monta con sesión y módulo activo, así su
@@ -24,7 +30,7 @@ export default function DispositivosApp({ onCambiarModulo }) {
   const { showAlert, showToast } = useToast();
   const { user, logout } = useAuth();
   const displayName = user?.nombre || user?.username || 'Usuario';
-  const [settingsVisible, setSettingsVisible] = useState(false);
+  const [pestana, setPestana] = useState('inicio');
   const [pantalla, setPantalla] = useState({ vista: 'lista', id: null });
   const [syncStatus, setSyncStatus] = useState('synced');
   const [syncPendingCount, setSyncPendingCount] = useState(0);
@@ -95,7 +101,6 @@ export default function DispositivosApp({ onCambiarModulo }) {
   };
 
   const salir = async () => {
-    setSettingsVisible(false);
     let pendientes = 0;
     try {
       pendientes = await getPendingCount();
@@ -114,13 +119,15 @@ export default function DispositivosApp({ onCambiarModulo }) {
   };
 
   const { vista, id } = pantalla;
-  const titulo = vista === 'lista' ? `Hola, ${displayName}` : vista === 'detalle' ? 'Relevamiento' : 'Completar relevamiento';
+  const titulo = pestana === 'cuenta' ? 'Cuenta' : vista === 'lista' ? `Hola, ${displayName}` : vista === 'detalle' ? 'Relevamiento' : 'Completar relevamiento';
   const irAtras = () => setPantalla(vista === 'completar' ? { vista: 'detalle', id } : { vista: 'lista', id: null });
   // Vale para el botón del encabezado, el Atrás de Android y el del navegador.
   const vistaVigente = useRef(vista);
   vistaVigente.current = vista;
   const avisarEnvio = () => showToast({ type: 'info', message: 'Se está enviando el relevamiento. Esperá un momento.' });
-  const volver = () => {
+  // Antes de salir de «Completar»: frena durante el envío y pide confirmar con algo cargado. La usan el
+  // botón Atrás (encabezado, Android y navegador) y la barra inferior: `accion` es adónde se va.
+  const conGuarda = (accion) => {
     if (vista === 'completar' && estadoCompletar.current.enviando) {
       avisarEnvio();
       return;
@@ -137,51 +144,53 @@ export default function DispositivosApp({ onCambiarModulo }) {
             onPress: () => {
               if (vistaVigente.current !== 'completar') return;
               if (estadoCompletar.current.enviando) { avisarEnvio(); return; }
-              irAtras();
+              accion();
             },
           },
         ]);
       return;
     }
-    irAtras();
+    accion();
   };
-  useBotonAtras({ activo: vista !== 'lista', alAtras: volver });
+  const volver = () => {
+    if (pestana === 'cuenta') { setPestana('inicio'); return; }
+    conGuarda(irAtras);
+  };
+  // Tocar una pestaña: a Inicio se llega siempre a la lista (con la guarda de arriba); a Cuenta, tras la guarda.
+  const irAPestana = (destino) => {
+    if (destino === pestana && (destino === 'cuenta' || vista === 'lista')) return;
+    conGuarda(() => {
+      setPantalla({ vista: 'lista', id: null });
+      setPestana(destino);
+      refrescarEstado();
+    });
+  };
+  useBotonAtras({ activo: vista !== 'lista' || pestana !== 'inicio', alAtras: volver });
 
   return (
     <>
       <Banner title={titulo} syncStatus={syncStatus} syncPendingCount={syncPendingCount}
-        onSyncPress={sincronizarAhora} showBackButton={vista !== 'lista'} onBackPress={volver} />
+        onSyncPress={sincronizarAhora} showBackButton={vista !== 'lista' || pestana !== 'inicio'} onBackPress={volver} />
       <View style={{ flex: 1, backgroundColor: theme.colors.background }}>
-        {vista === 'lista' ? (
+        {pestana === 'cuenta' ? (
+          <CuentaScreen
+            onCambiarModulo={onCambiarModulo && (() => { onCambiarModulo(); })}
+            onLogout={salir}
+          />
+        ) : null}
+        {pestana === 'inicio' && vista === 'lista' ? (
           <DispositivosListaScreen syncTick={syncTick} onAbrir={(abierto) => setPantalla({ vista: 'detalle', id: abierto })} />
         ) : null}
-        {vista === 'detalle' ? (
+        {pestana === 'inicio' && vista === 'detalle' ? (
           <DispositivoDetalleScreen inspeccionId={id} syncTick={syncTick}
             onSalir={() => { setPantalla({ vista: 'lista', id: null }); refrescarEstado(); }}
             onCompletar={(abierto) => setPantalla({ vista: 'completar', id: abierto })} />
         ) : null}
-        {vista === 'completar' ? (
+        {pestana === 'inicio' && vista === 'completar' ? (
           <DispositivoCompletarScreen inspeccionId={id} onEstado={(estado) => { estadoCompletar.current = estado; }} onTerminar={() => { setPantalla({ vista: 'lista', id: null }); refrescarEstado(); }} />
         ) : null}
       </View>
-      {vista === 'lista' ? (
-        <View style={styles.barra}>
-          <CustomButton title="Menú" variant="secondary" iconLeft="menu" onPress={() => setSettingsVisible(true)} />
-        </View>
-      ) : null}
-      <SettingsPanel
-        visible={!!settingsVisible}
-        onClose={() => setSettingsVisible(false)}
-        onCambiarModulo={onCambiarModulo && (() => {
-          setSettingsVisible(false);
-          onCambiarModulo();
-        })}
-        onLogout={salir}
-      />
+      <BottomNav items={PESTANAS} activeTab={pestana} onTabPress={irAPestana} />
     </>
   );
 }
-
-const styles = StyleSheet.create({
-  barra: { padding: 12, alignItems: 'center' },
-});

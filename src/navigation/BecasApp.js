@@ -8,16 +8,23 @@ import { useToast } from '../context/ToastContext';
 import HomeScreen from '../screens/HomeScreen';
 import Banner from '../components/Banner';
 import BottomNav from '../components/BottomNav';
-import SettingsPanel from '../components/SettingsPanel';
 import AvisosBandeja from '../components/AvisosBandeja';
 import useAvisos from '../hooks/useAvisos';
 import PageTransition from '../components/PageTransition';
 import RelevamientosScreen from '../screens/RelevamientosScreen';
 import RelevamientoDetailScreen from '../screens/RelevamientoDetailScreen';
+import CuentaScreen from '../screens/CuentaScreen';
 import relevamientoService from '../services/relevamientoService';
 import { resumenSyncManual } from '../utils/syncManual';
 
 const NEW_RELEVAMIENTO_STATES = ['ASIGNADO'];
+
+// Entradas de la barra inferior de Becas (la misma lista para todos los roles del módulo).
+const PESTANAS = [
+  { id: 'Inicio', label: 'Inicio', icon: 'home-outline', activeIcon: 'home' },
+  { id: 'Relevamientos', label: 'Relevamientos', icon: 'clipboard-outline', activeIcon: 'clipboard' },
+  { id: 'Cuenta', label: 'Cuenta', icon: 'person-circle-outline', activeIcon: 'person-circle' },
+];
 
 // Módulo Becas. Se monta solo con sesión y Becas activo: su sincronización de fondo y
 // sus avisos no corren mientras se trabaja en otro módulo.
@@ -28,7 +35,6 @@ export default function BecasApp({ onCambiarModulo }) {
   const displayName = user?.nombre || user?.username || 'Usuario';
 
   const [activeTab, setActiveTab] = useState('Inicio');
-  const [settingsVisible, setSettingsVisible] = useState(false);
   const [selectedRelevamientoId, setSelectedRelevamientoId] = useState(null);
   const [avisosVisible, setAvisosVisible] = useState(false);
 
@@ -120,6 +126,23 @@ export default function BecasApp({ onCambiarModulo }) {
 
   const renderScreen = () => {
     switch (activeTab) {
+      case 'Cuenta':
+        return (
+          <CuentaScreen
+            avisosNoLeidos={avisos.noLeidos}
+            onOpenAvisos={() => setAvisosVisible(true)}
+            onCambiarModulo={onCambiarModulo && (() => {
+              setAvisosVisible(false);
+              onCambiarModulo();
+            })}
+            onLogout={() => {
+              setAvisosVisible(false);
+              logout();
+              setActiveTab('Inicio');
+              setSelectedRelevamientoId(null);
+            }}
+          />
+        );
       case 'Relevamientos':
         return (
           <RelevamientosScreen
@@ -208,38 +231,18 @@ export default function BecasApp({ onCambiarModulo }) {
             </View>
 
             <BottomNav
+              items={PESTANAS.map((item) => ({
+                ...item,
+                punto: item.id === 'Relevamientos' && newRelevamientosCount > 0,
+                cantidad: item.id === 'Cuenta' ? avisos.noLeidos : 0,
+              }))}
               activeTab={activeTab}
               onTabPress={handleTabPress}
-              onOpenSettings={() => setSettingsVisible(true)}
-              pendingCount={newRelevamientosCount}
-              avisosCount={avisos.noLeidos}
             />
           </>
         )}
       </View>
 
-      {/* Settings Panel is always ready but hidden */}
-      <SettingsPanel
-        visible={!!settingsVisible}
-        onClose={() => setSettingsVisible(false)}
-        avisosNoLeidos={avisos.noLeidos}
-        onOpenAvisos={() => {
-          setSettingsVisible(false);
-          setAvisosVisible(true);
-        }}
-        onCambiarModulo={onCambiarModulo && (() => {
-          setSettingsVisible(false);
-          setAvisosVisible(false);
-          onCambiarModulo();
-        })}
-        onLogout={() => {
-          setSettingsVisible(false);
-          setAvisosVisible(false);
-          logout();
-          setActiveTab('Inicio');
-          setSelectedRelevamientoId(null);
-        }}
-      />
       <AvisosBandeja
         visible={avisosVisible}
         avisos={avisos.avisos}
