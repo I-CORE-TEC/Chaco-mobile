@@ -307,6 +307,7 @@ const mapEnvio = (op) => op && ({
   detail: op.last_error_info?.detail ?? op.last_error,
   claves: op.last_error_info?.claves ?? null,
   version_capturada: op.payload?.version_capturada ?? null,
+  avisos: Array.isArray(op.payload?.avisos) ? op.payload.avisos : [],
   retry_count: op.retry_count,
   next_retry_at: op.next_retry_at,
   created_at: op.created_at,
@@ -689,7 +690,10 @@ const ejecutarOperacion = async (operation, ownerId) => {
       ...(payload.respuestas ? { respuestas: payload.respuestas } : {}),
     };
     const detalle = await becasRequest(rutaInspeccion(id, 'resultado/'), { method: 'POST', body });
-    await guardar({ hecho: { ...payload.hecho, resultado: true } });
+    // `avisos` (Cambio 534): lo que falta y no bloquea el cierre. Se guarda con la operación porque
+    // el envío puede terminar en segundo plano, cuando la pantalla de carga ya no está.
+    const avisos = Array.isArray(detalle?.avisos) ? detalle.avisos.filter((a) => typeof a === 'string' && a.trim()) : [];
+    await guardar({ hecho: { ...payload.hecho, resultado: true }, avisos });
     try {
       await guardarDetalleCache(ownerId, detalle);
     } catch (error) {

@@ -47,12 +47,46 @@ export const ETIQUETA_ENVIO = {
   enviado: 'Enviado',
 };
 
+// El back contesta igual (404, mismo cuerpo) a lo que no existe y a lo que no es del agente: el
+// texto tiene que valer para los dos.
+const TEXTO_ALCANCE = 'no está a tu cargo. Si debería estarlo, pedile a la coordinación que revise tu alcance.';
+export const TEXTO_FUERA_DE_ALCANCE = `No tenés acceso a este edificio o dispositivo, o ya no existe. Pedile a la coordinación que revise tu alcance.`;
+
+// Solo lo que el back dice: 404 (no existe o no es del agente) o un 403 con cuerpo JSON del API
+// (`detail` o `code`) que no sea de módulo apagado (SIN_MODULO tiene su propio aviso) ni de clave
+// provisoria (`codigo`). Un 403 sin cuerpo del API (HTML del WAF o del proxy, o vacío) no habla del
+// alcance del agente: sigue el error genérico de la app.
+export const esFueraDeAlcance = (error) => {
+  const status = Number(error?.status || 0);
+  if (status === 404) return !error?.unexpectedHtml;
+  if (status !== 403 || error?.unexpectedHtml) return false;
+  const payload = error?.payload && typeof error.payload === 'object' ? error.payload : null;
+  return !!payload && !!(payload.detail || payload.code) && payload.code !== 'SIN_MODULO' && !payload.codigo;
+};
+
+// Mensaje de una carga que falló: el de alcance si corresponde; si no, el del error.
+export const mensajeDeCarga = (error, base) => (esFueraDeAlcance(error)
+  ? TEXTO_FUERA_DE_ALCANCE : (error?.message || base));
+
+// Clave estable de un aviso de la lista: el texto; solo si se repite suma el orden de esa repetición.
+export const claveAviso = (avisos, indice) => {
+  const texto = String(avisos[indice]);
+  let anteriores = 0;
+  for (let i = 0; i < indice; i += 1) if (String(avisos[i]) === texto) anteriores += 1;
+  return anteriores ? `${texto}#${anteriores}` : texto;
+};
+
+// Para el listado entero: no es «este edificio», es todo lo asignado.
+export const TEXTO_LISTA_NO_CARGADA = 'No pudimos cargar tus relevamientos. Si no ves lo que te corresponde, pedile a la coordinación que revise tu alcance.';
+export const mensajeDeCargaLista = (error, base) => (esFueraDeAlcance(error)
+  ? TEXTO_LISTA_NO_CARGADA : (error?.message || base));
+
 const TEXTO_POR_CODE = {
   REASIGNADA: 'Este relevamiento fue reasignado a otra persona. Lo que cargaste quedó guardado en el teléfono, sin enviar.',
   CANCELADA: 'Este relevamiento fue cancelado. Lo que cargaste quedó guardado en el teléfono, sin enviar.',
   YA_REALIZADA: 'Este relevamiento ya figura como realizado; no se envió de nuevo.',
   ESTADO_NO_ADMITE: 'El relevamiento ya no admite cargas en su estado actual.',
-  NO_ENCONTRADA: 'El relevamiento ya no está disponible para vos.',
+  NO_ENCONTRADA: `El relevamiento no existe o ${TEXTO_ALCANCE}`,
   REINTENTOS_AGOTADOS: 'No se pudo enviar después de varios intentos.',
   REABIERTA: 'Volvieron a asignarte este relevamiento. Lo que cargaste sigue guardado: completalo y enviá.',
   ARCHIVO_RECHAZADO: 'El servidor rechazó un archivo adjunto. Probá reintentar el envío.',

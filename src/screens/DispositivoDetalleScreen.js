@@ -6,7 +6,7 @@ import { useToast } from '../context/ToastContext';
 import CustomButton from '../components/CustomButton';
 import { statusTones } from '../theme/statusBadges';
 import { getInspeccion, reintentarFallidas, descartarEnvio } from '../services/dispositivosService';
-import { direccionDe, mapaUrl, describirEnvio, etiquetasDeCampos, textoEnEspera, ETIQUETA_ENVIO } from '../utils/dispositivos';
+import { direccionDe, mapaUrl, describirEnvio, etiquetasDeCampos, textoEnEspera, mensajeDeCarga, claveAviso, ETIQUETA_ENVIO } from '../utils/dispositivos';
 import { formatDate } from '../utils/dates';
 import { fontSizes, radii } from '../theme';
 
@@ -27,7 +27,7 @@ export default function DispositivoDetalleScreen({ inspeccionId, onCompletar, on
       if (result) { setDetalle(result); setError(''); }
       else setError('No se pudo cargar el relevamiento. Revisá la conexión e intentá de nuevo.');
     } catch (e) {
-      setError(e?.message || 'No se pudo cargar el relevamiento.');
+      setError(mensajeDeCarga(e, 'No se pudo cargar el relevamiento.'));
     } finally {
       setLoading(false);
     }
@@ -85,12 +85,16 @@ export default function DispositivoDetalleScreen({ inspeccionId, onCompletar, on
     }
   };
 
-  if (loading) return <View style={styles.centro}><ActivityIndicator size="large" color={theme.colors.primary} /></View>;
+  if (loading) return (
+    <View style={styles.centro}>
+      <ActivityIndicator size="large" color={theme.colors.primary} accessibilityLabel="Cargando el relevamiento" />
+    </View>
+  );
   if (!detalle) {
     return (
       <View style={styles.centro}>
-        <Text style={[styles.valor, { color: theme.colors.text, fontFamily: typography.medium }]}>{error}</Text>
-        <CustomButton title="Reintentar" variant="secondary" onPress={() => { setLoading(true); cargar(); }} />
+        <Text accessibilityRole="alert" style={[styles.valor, { color: theme.colors.text, fontFamily: typography.medium }]}>{error}</Text>
+        <CustomButton title="Reintentar" variant="secondary" iconLeft="refresh" onPress={() => { setLoading(true); cargar(); }} />
       </View>
     );
   }
@@ -109,7 +113,7 @@ export default function DispositivoDetalleScreen({ inspeccionId, onCompletar, on
   return (
     <ScrollView style={{ flex: 1, backgroundColor: theme.colors.background }} contentContainerStyle={styles.content}>
       <View style={[styles.card, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
-        <Text style={[styles.titulo, { color: theme.colors.text, fontFamily: typography.bold }]}>{edificio.nombre || `Relevamiento ${detalle.id}`}</Text>
+        <Text accessibilityRole="header" style={[styles.titulo, { color: theme.colors.text, fontFamily: typography.bold }]}>{edificio.nombre || `Relevamiento ${detalle.id}`}</Text>
         {fila('Código', edificio.codigo)}
         {fila('Dirección', direccion)}
         {url ? (
@@ -125,7 +129,7 @@ export default function DispositivoDetalleScreen({ inspeccionId, onCompletar, on
 
       {envio ? (
         <View style={[styles.card, { backgroundColor: tono.bg, borderColor: tono.bd }]}>
-          <Text style={[styles.titulo, { color: tono.tx, fontFamily: typography.bold }]}>{`Envío: ${ETIQUETA_ENVIO[envio.estado] || envio.estado}`}</Text>
+          <Text accessibilityRole="header" style={[styles.titulo, { color: tono.tx, fontFamily: typography.bold }]}>{`Envío: ${ETIQUETA_ENVIO[envio.estado] || envio.estado}`}</Text>
           {motivo ? (
             <>
               <Text accessibilityRole="alert" style={[styles.valor, { color: tono.tx, fontFamily: typography.semibold }]}>{motivo.titulo}</Text>
@@ -148,6 +152,17 @@ export default function DispositivoDetalleScreen({ inspeccionId, onCompletar, on
               {envio.estado === 'enviado' ? 'El resultado ya se registró.' : textoEnEspera(envio)}
             </Text>
           )}
+        </View>
+      ) : null}
+
+      {envio?.estado === 'enviado' && envio.avisos?.length ? (
+        <View style={[styles.card, { backgroundColor: statusTones.warning.bg, borderColor: statusTones.warning.bd }]}>
+          <Text accessibilityRole="header" style={[styles.titulo, { color: statusTones.warning.tx, fontFamily: typography.bold }]}>
+            Avisos del envío
+          </Text>
+          {envio.avisos.map((aviso, indice) => (
+            <Text key={claveAviso(envio.avisos, indice)} style={[styles.valor, { color: statusTones.warning.tx, fontFamily: typography.medium }]}>{`• ${aviso}`}</Text>
+          ))}
         </View>
       ) : null}
 

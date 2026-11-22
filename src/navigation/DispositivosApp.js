@@ -5,6 +5,7 @@ import { repetirMientrasActiva } from '../services/sincronizacionPeriodica';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { useToast } from '../context/ToastContext';
+import useBotonAtras from '../hooks/useBotonAtras';
 import Banner from '../components/Banner';
 import CustomButton from '../components/CustomButton';
 import SettingsPanel from '../components/SettingsPanel';
@@ -31,6 +32,8 @@ export default function DispositivosApp({ onCambiarModulo }) {
   const enCurso = useRef(false);
   const reconexion = useRef(null);
   const montado = useRef(true);
+  // Lo que informa la pantalla de carga: algo sin enviar, o un envío en curso.
+  const estadoCompletar = useRef({ cambios: false, enviando: false });
 
   const refrescarEstado = async () => {
     try {
@@ -112,7 +115,37 @@ export default function DispositivosApp({ onCambiarModulo }) {
 
   const { vista, id } = pantalla;
   const titulo = vista === 'lista' ? `Hola, ${displayName}` : vista === 'detalle' ? 'Relevamiento' : 'Completar relevamiento';
-  const volver = () => setPantalla(vista === 'completar' ? { vista: 'detalle', id } : { vista: 'lista', id: null });
+  const irAtras = () => setPantalla(vista === 'completar' ? { vista: 'detalle', id } : { vista: 'lista', id: null });
+  // Vale para el botón del encabezado, el Atrás de Android y el del navegador.
+  const vistaVigente = useRef(vista);
+  vistaVigente.current = vista;
+  const avisarEnvio = () => showToast({ type: 'info', message: 'Se está enviando el relevamiento. Esperá un momento.' });
+  const volver = () => {
+    if (vista === 'completar' && estadoCompletar.current.enviando) {
+      avisarEnvio();
+      return;
+    }
+    if (vista === 'completar' && estadoCompletar.current.cambios) {
+      showAlert('¿Salir sin enviar?',
+        'Lo que cargaste queda guardado como borrador en este teléfono; lo retomás cuando vuelvas a completar.', [
+          { text: 'Seguir cargando', style: 'cancel' },
+          {
+            text: 'Salir',
+            style: 'destructive',
+            // El envío puede haber arrancado entre el toque en Atrás y esta confirmación: se lee el
+            // estado vigente (no el capturado) y se confirma que la pantalla sigue siendo Completar.
+            onPress: () => {
+              if (vistaVigente.current !== 'completar') return;
+              if (estadoCompletar.current.enviando) { avisarEnvio(); return; }
+              irAtras();
+            },
+          },
+        ]);
+      return;
+    }
+    irAtras();
+  };
+  useBotonAtras({ activo: vista !== 'lista', alAtras: volver });
 
   return (
     <>
@@ -128,7 +161,7 @@ export default function DispositivosApp({ onCambiarModulo }) {
             onCompletar={(abierto) => setPantalla({ vista: 'completar', id: abierto })} />
         ) : null}
         {vista === 'completar' ? (
-          <DispositivoCompletarScreen inspeccionId={id} onTerminar={() => { setPantalla({ vista: 'lista', id: null }); refrescarEstado(); }} />
+          <DispositivoCompletarScreen inspeccionId={id} onEstado={(estado) => { estadoCompletar.current = estado; }} onTerminar={() => { setPantalla({ vista: 'lista', id: null }); refrescarEstado(); }} />
         ) : null}
       </View>
       {vista === 'lista' ? (
