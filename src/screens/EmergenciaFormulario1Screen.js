@@ -6,10 +6,11 @@ import TextInput from '../components/FormInput';
 import FechaInput from '../components/FechaInput';
 import CustomButton from '../components/CustomButton';
 import CameraModal from '../components/CameraModal';
+import InterruptorSiNo from '../components/InterruptorSiNo';
 import { useTheme } from '../context/ThemeContext';
 import { useToast } from '../context/ToastContext';
 import * as ImagePicker from '../services/imagePicker';
-import { consultarPersona } from '../services/emergenciaApi';
+import { consultarPersona, sugerirPersonas } from '../services/emergenciaApi';
 import { identityFailure, DECEASED_MESSAGE } from '../services/identityLookup';
 import { posicionActual, UBICACION_DEMORADA } from '../services/ubicacion';
 import { forgetWebFile } from '../services/webAttachments';
@@ -17,7 +18,7 @@ import {
   abrirBorrador, guardarBorrador, ponerFoto, quitarFoto, encolarCaso, descartar, getLocalidadesGuardadas,
 } from '../services/emergenciaCola';
 import { aJpeg } from '../utils/jpeg';
-import { cleanDigits, isValidDni, normalizeDateText, normalizeSex, parseDniCode } from '../utils/dni';
+import { cleanDigits, formatDni, isValidDni, normalizeDateText, normalizeSex, parseDniCode, tecleadoDni } from '../utils/dni';
 import {
   ASISTENCIA, AVISOS, CANTIDADES, FOTOS, MAX_DIRECCION, MAX_TRASLADO_OTRO, SEXOS, TRASLADOS,
   aCantidad, asistenciaVisible, filtrarLocalidades, hayErrores, listaDeErrores, mismaIdentidad, personaConfirmada, textoDeCode,
@@ -28,12 +29,21 @@ import { keyboardDismissModeFor } from '../utils/teclado';
 import { fontSizes, radii } from '../theme';
 
 const AUTOGUARDADO_MS = 500;
+// Sugerencias del DNI (#1299): desde cuántos dígitos se piden, cuánto se espera tras la última tecla y cuánto se
+// dejan de pedir si el servidor no las tiene (404, back anterior), sin permiso (403) o la cubeta de consultas se agotó (429).
+// Cada pedido gasta de la cubeta `personas_campo` del usuario: por eso 5 dígitos y no 3.
+export const SUGERENCIAS_MIN_DIGITOS = 5;
+export const SUGERENCIAS_ESPERA_MS = 450;
+export const SUGERENCIAS_PAUSA_MS = 60000;
 // Cambiar estos campos invalida lo que confirmó la consulta de identidad.
 const CAMPOS_IDENTIDAD = ['dni', 'sexo'];
 
 export const TEXTO_ENCOLADO = 'Guardado en el teléfono: se envía solo apenas haya señal.';
 export const TEXTO_SIN_RED_CONSULTA = 'Sin conexión: no se pudo buscar a la persona. Cargá nombre y apellido; el envío se manda cuando haya señal.';
 export const TEXTO_NO_ENCONTRADA = 'No figura en la Base de Personas ni en los legajos de DATAÑACH: cargá nombre y apellido para darla de alta.';
+export const TEXTO_NO_EN_LEGAJO = 'No figura en los legajos de DATAÑACH. Elegí el sexo que figura en el DNI y buscá de nuevo: la buscamos en la Base de Personas. O cargá nombre y apellido para darla de alta.';
+export const TEXTO_AYUDA_BUSQUEDA = 'Buscamos por DNI. El sexo solo se pide si la persona no está en los legajos.';
+const SEXO_TEXTO = { F: 'femenino', M: 'masculino' };
 
 // Formulario 1 de Emergencia (M1 · Ingreso de familias, contrato §6), en los cuatro bloques del
 // manual. Todo se guarda en el borrador del teléfono (sobrevive a cerrar la app) y «Enviar» lo
@@ -52,6 +62,9 @@ export default function EmergenciaFormulario1Screen({ uuid = null, onTerminar })
   const [busquedaLocalidad, setBusquedaLocalidad] = useState('');
   const [consultando, setConsultando] = useState(false);
   const [avisoConsulta, setAvisoConsulta] = useState(null);
+  // `true` desde el 404 `no_en_legajo` hasta que cambia el DNI: recién ahí se pide el sexo.
+  const [pidioSexo, setPidioSexo] = useState(false);
+  const [sugerencias, setSugerencias] = useState([]);
   const [ubicando, setUbicando] = useState(false);
   const [errorUbicacion, setErrorUbicacion] = useState('');
   const [fotoEnProceso, setFotoEnProceso] = useState(null);
@@ -66,6 +79,9 @@ export default function EmergenciaFormulario1Screen({ uuid = null, onTerminar })
   // pedido de identidad en curso y el envío en curso (un segundo toque no hace nada).
   const datosRef = useRef(null);
   const consultaEnCurso = useRef(0);
+  const consultaConSexo = useRef(false);
+  const pedidoSugerencias = useRef(0);
+  const sugerenciasPausadasHasta = useRef(0);
   const enviandoRef = useRef(false);
   datosRef.current = datos;
 
@@ -106,8 +122,13 @@ export default function EmergenciaFormulario1Screen({ uuid = null, onTerminar })
   }, []);
 
   const cambiar = (cambios) => {
-    const cambiaIdentidad = CAMPOS_IDENTIDAD.some((campo) => campo in cambios
-      && String(cambios[campo] ?? '') !== String(datosRef.current?.[campo] ?? ''));
+    const cambio = (campo) => campo in cambios && String(cambios[campo] ?? '') !== String(datosRef.current?.[campo] ?? '');
+    // Una consulta solo por DNI no depende del sexo: elegirlo mientras vuela no la descarta.
+    const cambiaIdentidad = cambio('dni') || (cambio('sexo') && consultaConSexo.current);
+    if (cambio('dni')) {
+      setPidioSexo(false);
+      setSugerencias([]);
+    }
     if (cambiaIdentidad) {
       // La consulta en vuelo era de otra persona: su respuesta se descarta.
       consultaEnCurso.current += 1;
@@ -115,7 +136,9 @@ export default function EmergenciaFormulario1Screen({ uuid = null, onTerminar })
     }
     setDatos((prev) => {
       const next = { ...prev, ...cambios };
-      if (CAMPOS_IDENTIDAD.some((campo) => campo in cambios && cambios[campo] !== prev[campo])) next.consulta = null;
+      // Lo que confirmó un legajo es del DNI: completar el sexo a mano (legajo sin sexo) no lo invalida.
+      const campos = prev.consulta?.origen === 'legajo' ? ['dni'] : CAMPOS_IDENTIDAD;
+      if (campos.some((campo) => campo in cambios && cambios[campo] !== prev[campo])) next.consulta = null;
       return next;
     });
     setErroresServidor((prev) => {
@@ -138,38 +161,61 @@ export default function EmergenciaFormulario1Screen({ uuid = null, onTerminar })
   const errorDe = (...campos) => campos.flatMap((campo) => errores[campo] || []);
 
   // ---- Identidad ----
-  const buscarPersona = async () => {
-    const faltan = validarConsulta(datos);
+  // Busca solo por DNI (#1301). Si no está en los legajos (404 `no_en_legajo`), pide el sexo y la segunda
+  // pasada va con él a Base de Personas. `dniElegido`: el DNI de una sugerencia, que todavía no está en `datos`.
+  const buscarPersona = async (dniElegido = null) => {
+    const dni = cleanDigits(dniElegido ?? datos.dni);
+    const conSexo = pidioSexo && dniElegido == null;
+    const faltan = validarConsulta({ dni, sexo: datos.sexo }, { conSexo });
     if (hayErrores(faltan)) {
       setAvisoConsulta({ tono: 'warning', texto: listaDeErrores(faltan).map((e) => e.texto).join(' ') });
       return;
     }
     consultaEnCurso.current += 1;
     const pedido = consultaEnCurso.current;
+    consultaConSexo.current = conSexo;
+    pedidoSugerencias.current += 1;
+    setSugerencias([]);
     setConsultando(true);
     setAvisoConsulta(null);
-    const dni = cleanDigits(datos.dni);
-    const sexo = String(datos.sexo).toUpperCase();
-    // Solo vale si sigue siendo el último pedido y en pantalla siguen ese DNI y ese sexo.
+    const sexo = conSexo ? String(datos.sexo).toUpperCase() : '';
+    // Solo vale si sigue siendo el último pedido y en pantalla sigue ese DNI (y ese sexo, si se mandó).
     const vigente = () => montado.current && consultaEnCurso.current === pedido
-      && mismaIdentidad({ dni, sexo }, datosRef.current || {});
+      && cleanDigits(datosRef.current?.dni) === dni
+      && (!conSexo || String(datosRef.current?.sexo || '').toUpperCase() === sexo);
     try {
-      const respuesta = await consultarPersona({ dni, sexo });
+      const respuesta = await consultarPersona(conSexo ? { dni, sexo } : { dni });
       if (!vigente()) return;
       const persona = respuesta?.data || {};
-      setDatos((prev) => (!mismaIdentidad({ dni, sexo }, prev) ? prev : {
-        ...prev,
-        nombre: persona.nombre || prev.nombre,
-        apellido: persona.apellido || prev.apellido,
-        fecha_nacimiento: persona.fecha_nacimiento ? normalizeDateText(persona.fecha_nacimiento) : prev.fecha_nacimiento,
-        consulta: { estado: 'encontrada', dni, sexo },
-      }));
+      const origen = respuesta?.origen === 'legajo' ? 'legajo' : 'personas';
+      // Cuando responde el legajo, el sexo es el suyo (vacío si no lo tiene: se completa a mano, sin bloquear).
+      const sexoPersona = String(persona.sexo || '').toUpperCase();
+      const sexoDelLegajo = ['F', 'M'].includes(sexoPersona) ? sexoPersona : '';
+      setDatos((prev) => {
+        if (cleanDigits(prev.dni) !== dni) return prev;
+        const sexoFinal = origen === 'legajo' ? (sexoDelLegajo || prev.sexo) : prev.sexo;
+        return {
+          ...prev,
+          sexo: sexoFinal,
+          nombre: persona.nombre || prev.nombre,
+          apellido: persona.apellido || prev.apellido,
+          fecha_nacimiento: persona.fecha_nacimiento ? normalizeDateText(persona.fecha_nacimiento) : prev.fecha_nacimiento,
+          consulta: { estado: 'encontrada', origen, dni, sexo: origen === 'legajo' ? sexoDelLegajo : sexo },
+        };
+      });
+      setPidioSexo(false);
       setErroresServidor((prev) => {
         if (!prev.nombre && !prev.apellido && !prev.fecha_nacimiento) return prev;
         const { nombre: _n, apellido: _a, fecha_nacimiento: _f, ...resto } = prev;
         return resto;
       });
-      setAvisoConsulta({ tono: 'success', texto: `Encontramos a ${[persona.nombre, persona.apellido].filter(Boolean).join(' ')} ${respuesta?.origen === 'legajo' ? 'en los legajos de DATAÑACH' : 'en la Base de Personas'}.` });
+      const sexoMostrado = origen === 'legajo' ? sexoDelLegajo : sexo;
+      setAvisoConsulta({
+        tono: 'success',
+        texto: [[persona.apellido, persona.nombre].filter(Boolean).join(', '), SEXO_TEXTO[sexoMostrado],
+          `encontrada ${origen === 'legajo' ? 'en los legajos' : 'en la Base de Personas'}`].filter(Boolean).join(' · '),
+        detalle: `DNI ${formatDni(dni)}`,
+      });
     } catch (e) {
       if (!vigente()) return;
       let estado = 'error';
@@ -177,6 +223,12 @@ export default function EmergenciaFormulario1Screen({ uuid = null, onTerminar })
       if (Number(e?.status) === 404 && e?.payload?.fallecido === true) {
         estado = 'fallecida';
         aviso = { tono: 'danger', texto: `${DECEASED_MESSAGE}. Revisá el DNI.` };
+      } else if ((Number(e?.status) === 404 && e?.payload?.no_en_legajo === true)
+        || (Number(e?.status) === 400 && !conSexo)) {
+        // El 400 sin sexo es un back anterior al Cambio 522, que lo exigía: mismo camino.
+        estado = 'no_en_legajo';
+        setPidioSexo(true);
+        aviso = { tono: 'warning', texto: TEXTO_NO_EN_LEGAJO };
       } else if (Number(e?.status) === 404) {
         estado = 'no_encontrada';
         aviso = { tono: 'warning', texto: TEXTO_NO_ENCONTRADA };
@@ -186,11 +238,43 @@ export default function EmergenciaFormulario1Screen({ uuid = null, onTerminar })
       } else {
         aviso = { tono: 'warning', texto: identityFailure(e).message };
       }
-      setDatos((prev) => (mismaIdentidad({ dni, sexo }, prev) ? { ...prev, consulta: { estado, dni, sexo } } : prev));
+      setDatos((prev) => (cleanDigits(prev.dni) === dni ? { ...prev, consulta: { estado, dni, sexo } } : prev));
       setAvisoConsulta(aviso);
     } finally {
       if (montado.current && consultaEnCurso.current === pedido) setConsultando(false);
     }
+  };
+
+  // Sugerencias del legajo mientras se escribe el DNI (#1299, punto 4). Silenciosas: cualquier error es «sin
+  // sugerencias» y el campo sigue como siempre; 404 (back sin el extremo) y 429 las pausan un minuto.
+  const dniTecleado = datos ? cleanDigits(datos.dni) : '';
+  const sinConsultar = !datos?.consulta;
+  useEffect(() => {
+    pedidoSugerencias.current += 1;
+    const pedido = pedidoSugerencias.current;
+    if (dniTecleado.length < SUGERENCIAS_MIN_DIGITOS || dniTecleado.length >= 8 || !sinConsultar) {
+      setSugerencias([]);
+      return undefined;
+    }
+    const timer = setTimeout(async () => {
+      if (Date.now() < sugerenciasPausadasHasta.current) return;
+      try {
+        const respuesta = await sugerirPersonas(dniTecleado);
+        if (!montado.current || pedidoSugerencias.current !== pedido) return;
+        setSugerencias(Array.isArray(respuesta?.resultados) ? respuesta.resultados.slice(0, 5) : []);
+      } catch (e) {
+        if ([403, 404, 429].includes(Number(e?.status))) sugerenciasPausadasHasta.current = Date.now() + SUGERENCIAS_PAUSA_MS;
+        if (montado.current && pedidoSugerencias.current === pedido) setSugerencias([]);
+      }
+    }, SUGERENCIAS_ESPERA_MS);
+    return () => clearTimeout(timer);
+  }, [dniTecleado, sinConsultar]);
+
+  const elegirSugerencia = (sugerida) => {
+    const dni = tecleadoDni(sugerida?.dni);
+    if (!isValidDni(dni)) return;
+    cambiar({ dni });
+    buscarPersona(dni);
   };
 
   const abrirScanner = async () => {
@@ -226,6 +310,8 @@ export default function EmergenciaFormulario1Screen({ uuid = null, onTerminar })
     // Una consulta de identidad en vuelo ya no es de este DNI.
     consultaEnCurso.current += 1;
     setConsultando(false);
+    setPidioSexo(false);
+    setSugerencias([]);
     setDatos((prev) => {
       const sexoFinal = ['F', 'M'].includes(sexo) ? sexo : prev.sexo;
       return {
@@ -446,21 +532,14 @@ export default function EmergenciaFormulario1Screen({ uuid = null, onTerminar })
     );
   };
 
-  const casilla = ({ clave, titulo }) => {
-    const marcada = datos[clave] === true;
-    return (
-      <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: marcada }} accessibilityLabel={titulo}
-        onPress={() => cambiar({ [clave]: !marcada })} style={styles.casilla}>
-        <Ionicons name={marcada ? 'checkbox' : 'square-outline'} size={24} color={marcada ? theme.colors.primary : theme.colors.textSoft}
-          accessible={false} importantForAccessibility="no" />
-        <Text style={[styles.flex, etiqueta]}>{titulo}</Text>
-      </Pressable>
-    );
-  };
+  const casilla = ({ clave, titulo }) => (
+    <InterruptorSiNo titulo={titulo} valor={datos[clave] === true} onChange={(valor) => cambiar({ [clave]: valor })} />
+  );
 
-  const aviso = ({ tono, texto }) => (
+  const aviso = ({ tono, texto, detalle }) => (
     <View accessibilityRole="alert" style={[styles.aviso, { backgroundColor: statusTones[tono].bg, borderColor: statusTones[tono].bd }]}>
       <Text style={[styles.texto, { color: statusTones[tono].tx, fontFamily: typography.semibold }]}>{texto}</Text>
+      {detalle ? <Text style={[styles.texto, { color: statusTones[tono].tx, fontFamily: typography.medium }]}>{detalle}</Text> : null}
     </View>
   );
 
@@ -469,6 +548,8 @@ export default function EmergenciaFormulario1Screen({ uuid = null, onTerminar })
   const topes = topesAsistencia(datos);
   const ocultos = textoDeOcultos(visible);
   const confirmada = personaConfirmada(datos.consulta, datos);
+  // El legajo trae su propio sexo: se muestra y no se pide.
+  const sexoDelLegajo = confirmada && datos.consulta?.origen === 'legajo' && ['F', 'M'].includes(String(datos.consulta.sexo).toUpperCase());
   const sugeridas = filtrarLocalidades(localidades, busquedaLocalidad);
   const conUbicacion = datos.latitud != null && datos.longitud != null;
   const listado = listaDeErrores(errores);
@@ -494,17 +575,34 @@ export default function EmergenciaFormulario1Screen({ uuid = null, onTerminar })
 
         <Text style={[etiqueta, styles.separado]}>DNI del responsable *</Text>
         <View style={styles.fila}>
-          <TextInput value={datos.dni} onChangeText={(texto) => cambiar({ dni: cleanDigits(texto).slice(0, 8) })}
-            keyboardType="number-pad" maxLength={8} accessibilityLabel="DNI del responsable" placeholder="Solo números"
-            placeholderTextColor={theme.colors.textSoft} style={[...caja(['dni']), styles.flex]} />
+          <TextInput value={datos.dni} onChangeText={(texto) => cambiar({ dni: tecleadoDni(texto) })}
+            keyboardType="number-pad" inputMode="numeric" autoComplete="off" accessibilityLabel="DNI del responsable"
+            placeholder="Solo números" placeholderTextColor={theme.colors.textSoft} style={[...caja(['dni']), styles.flex]} />
           <CustomButton title="Escanear DNI" variant="secondary" iconLeft="scan-outline" onPress={abrirScanner} />
         </View>
         {errorCampo(['dni'])}
-        <Text style={etiqueta}>Sexo (como figura en el DNI)</Text>
-        {opcionesDe({ nombre: 'Sexo', opciones: SEXOS, valor: datos.sexo, onElegir: (valor) => cambiar({ sexo: valor }) })}
+        {sugerencias.map((sugerida) => (
+          <Pressable key={String(sugerida.dni)} accessibilityRole="button"
+            accessibilityLabel={`Elegir a ${sugerida.apellido}, ${sugerida.nombre}, DNI ${formatDni(sugerida.dni)}`}
+            onPress={() => elegirSugerencia(sugerida)} style={[styles.sugerida, { borderColor: theme.colors.border }]}>
+            <Text style={[styles.texto, { color: theme.colors.text, fontFamily: typography.medium }]}>
+              {`${sugerida.apellido}, ${sugerida.nombre} · ${formatDni(sugerida.dni)}`}
+            </Text>
+          </Pressable>
+        ))}
         <CustomButton title="Buscar persona" variant="secondary" iconLeft="search-outline" loading={consultando}
-          disabled={consultando} onPress={buscarPersona} />
+          disabled={consultando} onPress={() => buscarPersona()} />
+        {!pidioSexo && !datos.consulta ? <Text style={ayuda}>{TEXTO_AYUDA_BUSQUEDA}</Text> : null}
         {avisoConsulta ? aviso(avisoConsulta) : null}
+        {sexoDelLegajo ? (
+          <Text accessibilityLabel="Sexo" style={etiqueta}>{`Sexo: ${SEXO_TEXTO[String(datos.consulta.sexo).toUpperCase()]} (según el legajo)`}</Text>
+        ) : (pidioSexo || datos.sexo || datos.consulta) ? (
+          <>
+            <Text style={etiqueta}>Sexo (como figura en el DNI)</Text>
+            {opcionesDe({ nombre: 'Sexo', opciones: SEXOS, valor: datos.sexo, onElegir: (valor) => cambiar({ sexo: valor }) })}
+            {errorCampo(['sexo'])}
+          </>
+        ) : null}
 
         <Text style={[etiqueta, styles.separado]}>{confirmada ? 'Nombre' : 'Nombre *'}</Text>
         <TextInput value={datos.nombre} onChangeText={(texto) => cambiar({ nombre: texto })} autoCapitalize="words"
@@ -670,7 +768,6 @@ const styles = StyleSheet.create({
   contador: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 48 },
   paso: { width: 44, height: 44, borderWidth: 1, borderRadius: radii.full, alignItems: 'center', justifyContent: 'center' },
   valor: { minWidth: 28, textAlign: 'center', fontSize: fontSizes.base },
-  casilla: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 44 },
   aviso: { borderWidth: 1, borderRadius: radii.lg, padding: 10 },
   elegida: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: radii.lg, padding: 12 },
   sugerida: { borderWidth: 1, borderRadius: radii.lg, padding: 12, minHeight: 44, justifyContent: 'center' },

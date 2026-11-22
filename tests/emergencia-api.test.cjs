@@ -135,6 +135,23 @@ test('consultarPersona: ruta de Emergencia, solo dni y sexo, y solo origen perso
   await assert.rejects(e.consultarPersona({dni: '30111222', sexo: 'F'}), /fuente de identidad/);
 });
 
+test('consultarPersona: sin sexo manda solo el DNI (busca solo en legajos)', async () => {
+  const {r, e} = await preparar();
+  const calls = router(r, async () => response(200, {success: true, origen: 'legajo', data: {nombre: 'Adriana', apellido: 'Acevedo', sexo: 'F'}, datos_api: {}}));
+  await e.consultarPersona({dni: '49103788'});
+  assert.deepEqual(JSON.parse(calls[0].init.body), {dni: '49103788'});
+});
+
+test('sugerirPersonas (#1299): GET con el DNI tecleado y sin pasar por la verificación de módulo', async () => {
+  const {r, e} = await preparar();
+  const calls = router(r, async () => response(200, {resultados: [{apellido: 'Acevedo', nombre: 'Adriana', dni: '49103788'}], hay_mas: false}));
+  const res = await e.sugerirPersonas('49103');
+  assert.equal(res.resultados[0].dni, '49103788');
+  assert.equal(calls[0].method, 'GET');
+  assert.equal(calls[0].url, '/api/emergencia/personas/sugerir/?q=49103');
+  assert.equal(e.RUTAS.personasSugerir, '/api/emergencia/personas/sugerir/');
+});
+
 test('consultarPersona: acepta origen legajo y sigue rechazando uno desconocido', async () => {
   const {r, e} = await preparar();
   router(r, async () => response(200, {success: true, origen: 'legajo', data: {nombre: 'Rosa', apellido: 'Benitez', dni: '30111222'}, datos_api: {}}));

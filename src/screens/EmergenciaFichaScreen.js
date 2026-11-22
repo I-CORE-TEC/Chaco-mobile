@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import TextInput from '../components/FormInput';
+import InterruptorSiNo from '../components/InterruptorSiNo';
 import FechaInput from '../components/FechaInput';
 import CustomButton from '../components/CustomButton';
 import { useTheme } from '../context/ThemeContext';
@@ -505,17 +506,10 @@ export default function EmergenciaFichaScreen({
       {errorCampo(campo)}
     </View>
   );
-  const casilla = (campo, titulo) => {
-    const marcada = plano[campo] === true;
-    return (
-      <Pressable key={campo} accessibilityRole="checkbox" accessibilityState={{ checked: marcada, disabled: fijo }} accessibilityLabel={titulo}
-        disabled={fijo} onPress={() => cambiar({ [campo]: marcada ? null : true })} style={styles.casilla}>
-        <Ionicons name={marcada ? 'checkbox' : 'square-outline'} size={24} color={marcada ? theme.colors.primary : theme.colors.textSoft}
-          accessible={false} importantForAccessibility="no" />
-        <Text style={[styles.flex, etiqueta]}>{titulo}</Text>
-      </Pressable>
-    );
-  };
+  const casilla = (campo, titulo) => (
+    <InterruptorSiNo key={campo} titulo={titulo} valor={plano[campo] === true} deshabilitado={fijo}
+      onChange={(valor) => cambiar({ [campo]: valor ? true : null })} />
+  );
   const texto = (campo, titulo, { obligatorio = false, area = false, teclado, placeholder } = {}) => (
     <View key={campo} style={styles.campo}>
       <Text style={etiqueta}>{`${titulo}${obligatorio ? ' *' : ''}`}</Text>
@@ -754,7 +748,6 @@ const styles = StyleSheet.create({
   areaTexto: { minHeight: 96, textAlignVertical: 'top' },
   opciones: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   opcion: { minHeight: 44, paddingHorizontal: 14, borderWidth: 1, borderRadius: radii.lg, alignItems: 'center', justifyContent: 'center' },
-  casilla: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 44 },
   mapa: { gap: 12 },
   sector: { gap: 6 },
   cama: { flexDirection: 'row', alignItems: 'center', gap: 4, minHeight: 44, minWidth: 64, paddingHorizontal: 10, borderRadius: radii.lg, justifyContent: 'center' },

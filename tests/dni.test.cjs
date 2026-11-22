@@ -81,3 +81,17 @@ test('RelevamientoDetailScreen usa el parser de utils/dni y ya no tiene el suyo'
   assert.doesNotMatch(fuente, /const parseDniCode\s*=/);
   assert.doesNotMatch(fuente, /const (normalizeSex|cleanDigits|normalizeDateText|isValidDni)\s*=/);
 });
+
+test('DNI como el back (#1299): tecleado solo dígitos hasta 8, con puntos al mostrar y el mismo mensaje del backoffice', async () => {
+  const d = await cargar();
+  assert.equal(d.tecleadoDni('49.103.788a'), '49103788');
+  assert.equal(d.tecleadoDni('4910378899'), '49103788');
+  assert.equal(d.tecleadoDni('abc'), '');
+  assert.equal(d.formatDni('49103788'), '49.103.788');
+  assert.equal(d.formatDni('5123456'), '5.123.456');
+  assert.equal(d.formatDni('49.103.788'), '49.103.788');
+  assert.equal(d.formatDni('123'), '123');
+  assert.equal(d.formatDni(''), '');
+  assert.equal(d.MENSAJE_DNI_INVALIDO, 'Ingresá un DNI válido de 7 u 8 dígitos, sin puntos.');
+  assert.deepEqual([6, 7, 8, 9].map((n) => d.isValidDni('1'.repeat(n))), [false, true, true, false]);
+});

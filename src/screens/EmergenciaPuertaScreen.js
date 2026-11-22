@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import TextInput from '../components/FormInput';
+import InterruptorSiNo from '../components/InterruptorSiNo';
 import FechaInput from '../components/FechaInput';
 import CustomButton from '../components/CustomButton';
 import { useTheme } from '../context/ThemeContext';
@@ -388,17 +389,10 @@ export default function EmergenciaPuertaScreen({
       </View>
     );
   };
-  const casilla = ({ clave, titulo }) => {
-    const marcada = datos[clave] === true;
-    return (
-      <Pressable key={clave} accessibilityRole="checkbox" accessibilityState={{ checked: marcada, disabled: fijo }} accessibilityLabel={titulo}
-        disabled={fijo} onPress={() => cambiar({ [clave]: !marcada })} style={styles.casilla}>
-        <Ionicons name={marcada ? 'checkbox' : 'square-outline'} size={24} color={marcada ? theme.colors.primary : theme.colors.textSoft}
-          accessible={false} importantForAccessibility="no" />
-        <Text style={[styles.flex, etiqueta]}>{titulo}</Text>
-      </Pressable>
-    );
-  };
+  const casilla = ({ clave, titulo }) => (
+    <InterruptorSiNo key={clave} titulo={titulo} valor={datos[clave] === true} deshabilitado={fijo}
+      onChange={(valor) => cambiar({ [clave]: valor })} />
+  );
 
   const total = totalDeclarado(datos);
   const visible = asistenciaVisible(datos);
@@ -581,7 +575,6 @@ const styles = StyleSheet.create({
   contador: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 48 },
   paso: { width: 44, height: 44, borderWidth: 1, borderRadius: radii.full, alignItems: 'center', justifyContent: 'center' },
   valor: { minWidth: 28, textAlign: 'center', fontSize: fontSizes.base },
-  casilla: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 44 },
   buscando: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   aviso: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: radii.lg, padding: 10 },
 });

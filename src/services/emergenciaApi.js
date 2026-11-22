@@ -17,6 +17,7 @@ export const BASE = '/api/emergencia/';
 export const RUTAS = {
   indice: BASE,
   personasConsultar: `${BASE}personas/consultar/`,
+  personasSugerir: `${BASE}personas/sugerir/`,
   localidades: `${BASE}localidades/`,
   casos: `${BASE}casos/`,
   casosMios: `${BASE}casos/mios/`,
@@ -136,6 +137,11 @@ export const getLocalidades = () => conVerificacion(() => becasRequest(RUTAS.loc
 // §4. Mismo cuerpo y códigos que la consulta de Becas (identityFailure sirve igual).
 export const consultarPersona = ({ dni, sexo }) => conVerificacion(() => consultarIdentidad(
   { dni, sexo }, { ruta: RUTAS.personasConsultar, origenes: ORIGENES_IDENTIDAD }));
+
+// Sugerencias de personas del legajo mientras se escribe el DNI (#1299). `{resultados: [{apellido, nombre, dni}],
+// hay_mas}`. Gasta de la misma cubeta que la consulta (429) y un back anterior no la tiene (404): quien llama
+// trata cualquier error como «sin sugerencias», por eso no pasa por `conVerificacion`.
+export const sugerirPersonas = (dni) => becasRequest(`${RUTAS.personasSugerir}?q=${encodeURIComponent(dni)}`);
 
 // §6. `datos` con las claves de CAMPOS_CASO (las demás no se mandan); `fotos` con
 // `foto_vivienda` y `foto_acceso` como assets de aJpeg, opcionales. Latitud y longitud van
