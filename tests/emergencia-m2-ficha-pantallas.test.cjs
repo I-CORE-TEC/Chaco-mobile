@@ -42,6 +42,7 @@ function loadScreen(relative, mocks, extra = {}) {
     name => {
       // El interruptor es un componente real y compartido: se carga con los mismos mocks que la pantalla.
       if (name === '../components/InterruptorSiNo' && !mocks[name]) mocks[name] = {__esModule: true, default: loadScreen('src/components/InterruptorSiNo.js', mocks)};
+      if (name === '../components/IdentidadEnConflicto' && !mocks[name]) mocks[name] = {__esModule: true, default: loadScreen('src/components/IdentidadEnConflicto.js', mocks)};
       assert.ok(mocks[name], 'Missing screen mock: ' + name);
       return mocks[name];
     }, module, module.exports);

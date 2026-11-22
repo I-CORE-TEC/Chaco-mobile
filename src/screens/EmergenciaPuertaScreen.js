@@ -5,6 +5,7 @@ import TextInput from '../components/FormInput';
 import InterruptorSiNo from '../components/InterruptorSiNo';
 import FechaInput from '../components/FechaInput';
 import CustomButton from '../components/CustomButton';
+import IdentidadEnConflicto from '../components/IdentidadEnConflicto';
 import { useTheme } from '../context/ThemeContext';
 import { useToast } from '../context/ToastContext';
 import {
@@ -15,7 +16,7 @@ import { consultarPersona } from '../services/emergenciaApi';
 import { DECEASED_MESSAGE, identityFailure } from '../services/identityLookup';
 import { cleanDigits, normalizeDateText } from '../utils/dni';
 import {
-  ASISTENCIA, AVISOS, CANTIDADES, MAX_DIRECCION, MAX_TRASLADO_OTRO, SEXOS, TRASLADOS, aCantidad, asistenciaVisible, listaDeErrores, textoDeOcultos, topesAsistencia, totalDeclarado,
+  ASISTENCIA, AVISOS, CANTIDADES, MAX_DIRECCION, MAX_TRASLADO_OTRO, SEXOS, TRASLADOS, aCantidad, asistenciaVisible, listaDeErrores, personaEnConflicto, resolverIdentidad, sinRespuestaDeIdentidad, textoDeOcultos, topesAsistencia, totalDeclarado,
 } from '../utils/emergencia';
 import { statusTones } from '../theme/statusBadges';
 import { keyboardDismissModeFor } from '../utils/teclado';
@@ -95,6 +96,8 @@ export default function EmergenciaPuertaScreen({
   const consultaEnCurso = useRef(0);
   const encontradaRef = useRef(false);
   const consultarRef = useRef(null);
+  // La acción (ingresar/avisar) del último 400: la respuesta a «¿Es esa persona?» la repite.
+  const accionRechazada = useRef(null);
   datosRef.current = datos;
 
   useEffect(() => {
@@ -153,7 +156,10 @@ export default function EmergenciaPuertaScreen({
   fijoRef.current = fijo;
   const cambiar = (cambios) => {
     if (fijo) return;
-    setDatos((prev) => ({ ...prev, ...cambios }));
+    setDatos((prev) => {
+      const next = { ...prev, ...cambios };
+      return prev.es_misma_persona === true && ('nombre' in cambios || 'apellido' in cambios) ? sinRespuestaDeIdentidad(next) : next;
+    });
     setErroresServidor((prev) => {
       const claves = Object.keys(cambios);
       const tocaTotal = claves.some((c) => CANTIDADES.some((x) => x.clave === c));
@@ -226,7 +232,8 @@ export default function EmergenciaPuertaScreen({
     if (!elegida && !encontradaRef.current) consultar({ sexo: valor });
   };
 
-  const mandar = async (cual) => {
+  // `datosEnvio`: lo que se manda; sin él, lo de la pantalla (la respuesta a «¿Es esa persona?» manda lo nuevo antes de que el estado se actualice).
+  const mandar = async (cual, datosEnvio = null) => {
     const base = sesionRef.current;
     if (enviandoRef.current || !base) return;
     // Se toma antes de mirar la red (en nativo NetInfo tarda): dos toques seguidos no pasan los dos.
@@ -246,7 +253,7 @@ export default function EmergenciaPuertaScreen({
     avisarEnviando(true);
     try {
       const r = sinDatos ? await reintentarPuertaSinDatos(base, dispositivo.id, dni)
-        : await enviarPuerta(base, dispositivo.id, cual, datos, { dni });
+        : await enviarPuerta(base, dispositivo.id, cual, datosEnvio || datos, { dni });
       if (cual === 'ingresar') {
         const numero = r.caso?.numero ? `Caso ${r.caso.numero}` : 'Caso creado';
         const despues = r.caso && r.caso.estado !== 'INGRESO_EN_CURSO' ? ESTADOS_TRAS_INGRESO[r.caso.estado] || `el caso está en ${String(r.caso.estado || 'otro estado').toLowerCase().replaceAll('_', ' ')}` : null;
@@ -298,6 +305,7 @@ export default function EmergenciaPuertaScreen({
         return;
       }
       if (c.tipo === 'validacion') {
+        accionRechazada.current = cual;
         const { plazas, generales, ...campos } = c.errores || {};
         setIntentado(true);
         setErroresServidor(campos);
@@ -322,6 +330,18 @@ export default function EmergenciaPuertaScreen({
       avisarEnviando(false);
     }
   };
+
+  // Respuesta al 400 `persona_registrada`: «es esa persona» (solo el DNI) o «es otra persona» (queda a revisar).
+  const decidirIdentidad = (opcion) => {
+    const nuevos = resolverIdentidad(datos, opcion, personaEnConflicto(erroresServidor));
+    setDatos(nuevos);
+    sinPersonaRegistrada();
+    mandar(accionRechazada.current || accion, nuevos);
+  };
+  const sinPersonaRegistrada = () => setErroresServidor((prev) => {
+    const { persona_registrada: _p, dni: _d, ...resto } = prev;
+    return resto;
+  });
 
   const tocar = (cual) => {
     if (enviandoRef.current || esperando) return;
@@ -461,6 +481,10 @@ export default function EmergenciaPuertaScreen({
           style={caja(['dni'])} />
         <Text style={ayuda}>{TEXTO_DNI_FIJO}</Text>
         {errorCampo(['dni'])}
+        {personaEnConflicto(erroresServidor) ? (
+          <IdentidadEnConflicto persona={personaEnConflicto(erroresServidor)} deshabilitado={enviando || !sesion}
+            onMisma={() => decidirIdentidad('misma')} onOtra={() => decidirIdentidad('otra')} onCancelar={sinPersonaRegistrada} />
+        ) : null}
         {/* Solo para la pantalla (no viaja): con «Masculino» no se ofrece «Embarazo» para el responsable. */}
         <Text style={etiqueta}>Sexo (como figura en el DNI, opcional)</Text>
         <View style={styles.opciones} accessibilityRole="radiogroup" accessibilityLabel="Sexo">
@@ -501,6 +525,7 @@ export default function EmergenciaPuertaScreen({
         <Text style={etiqueta}>Teléfono de contacto</Text>
         <TextInput value={datos.telefono} editable={!fijo} onChangeText={(t) => cambiar({ telefono: t })} keyboardType="phone-pad"
           accessibilityLabel="Teléfono de contacto" placeholderTextColor={theme.colors.textSoft} style={caja(['telefono'])} />
+        {errorCampo(['telefono'])}
         {casilla({ clave: 'documento_extraviado', titulo: 'Perdió el documento (sabe el número)' })}
       </View>
 

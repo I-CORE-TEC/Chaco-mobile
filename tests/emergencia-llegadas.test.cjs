@@ -494,3 +494,29 @@ test('búsqueda: puede_ingresar_igual y puede_avisar_a_la_mesa deciden los boton
   igual(l.accionesSinDerivacion({...completo, plazas_libres: 0}), {ingresar: false, avisar: true}, 'la bandera no mira las camas');
   igual(l.accionesSinDerivacion({...completo, puede_avisar_a_la_mesa: false}), {ingresar: true, avisar: false});
 });
+
+test('M1: la derivación y la persona conservan identidad_a_revisar; sin ella, null', async () => {
+  const r = await setup();
+  const l = r.load('./emergenciaLlegadas');
+  const aRevisar = {nombre: 'Pedro', apellido: 'Gómez'};
+  const conMarca = l.normalizarBusqueda({...BUSQUEDA, derivacion: {...DERIVACION, responsable: {...DERIVACION.responsable, identidad_a_revisar: aRevisar}}});
+  igual(conMarca.derivacion.responsable.identidad_a_revisar, aRevisar);
+  igual(l.normalizarBusqueda(BUSQUEDA).derivacion.responsable.identidad_a_revisar, null);
+  igual(l.normalizarBusqueda({...BUSQUEDA, derivacion: {...DERIVACION, responsable: {...DERIVACION.responsable, identidad_a_revisar: {nombre: '', apellido: ''}}}})
+    .derivacion.responsable.identidad_a_revisar, null);
+  igual(l.normalizarPersona({...FILA(1), ficha: {}, secciones_incompletas: [], identidad_a_revisar: aRevisar}).identidad_a_revisar, aRevisar);
+  igual(l.normalizarPersona({...FILA(2), ficha: {}, secciones_incompletas: [], identidad_a_revisar: null}).identidad_a_revisar, null);
+  assert.match(l.textoIdentidadARevisar(aRevisar), /Gómez, Pedro/);
+});
+
+test('A3: el 400 persona_registrada de la puerta llega a la pantalla como persona y no como mensaje general', async () => {
+  const r = await setup();
+  const l = r.load('./emergenciaLlegadas');
+  const error = {status: 400, payload: {code: 'VALIDACION', detail: 'DNI registrado', dni: ['Ese DNI ya está registrado como otra persona.'],
+    persona_registrada: {apellido: 'FARIÑA', nombre: 'Joaquin'}}};
+  const c = l.clasificarErrorLlegada(error, {campos: l.CAMPOS_PUERTA_400});
+  igual(c.errores, {dni: ['Ese DNI ya está registrado como otra persona.'], persona_registrada: {apellido: 'FARIÑA', nombre: 'Joaquin'}});
+  assert.ok(!('generales' in c.errores));
+  assert.ok(!l.validarPuerta({traslado: 'BOMBEROS', dni: '30111222', adultos_f: 1, es_misma_persona: true}).nombre);
+  assert.ok(l.validarPuerta({traslado: 'BOMBEROS', dni: '30111222', adultos_f: 1, telefono: '12'}).telefono, 'M2: teléfono también en la puerta');
+});

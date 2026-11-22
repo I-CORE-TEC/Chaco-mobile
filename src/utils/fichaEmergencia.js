@@ -7,6 +7,7 @@
 // entre secciones, y el «sin datos» de una sección es `<seccion>_sin_datos`. Al mandar se vuelve a
 // armar anidada, con solo lo respondido (una pregunta sin responder no se manda; `false` sí).
 import { cleanDigits, isValidDni } from '../utils/dni';
+import { errorDeTelefono } from '../utils/telefono';
 
 export const FICHA_VERSION = 1;
 export const EDAD_SIN_ADULTO_RESPONSABLE = 16;
@@ -349,6 +350,8 @@ const validarTipos = (plano, secciones, errores, hoy) => {
       if (!parametro.includes(String(valor).trim())) agregar(errores, campo, TEXTOS_FICHA.opcion);
     } else if (String(valor).trim().length > parametro) {
       agregar(errores, campo, TEXTOS_FICHA.largo(parametro));
+    } else if (campo === 'telefono' && errorDeTelefono(valor)) {
+      agregar(errores, campo, errorDeTelefono(valor));
     }
   }));
 };
@@ -379,7 +382,10 @@ export const validarConfirmacion = (plano = {}, { plazaId = null, hoy = new Date
 };
 
 // Lo que se puede saber antes de guardar las secciones 4 a 8 (§13.6): tipos y largos, y que un menor
-// de 16 no quede sin adulto responsable (el back vuelve a validar el mínimo con la ficha completa).
+// de 16 no quede sin adulto responsable. Es la regla del back (`completar_ficha` revalida el mínimo con la
+// ficha ya mezclada con lo guardado: `plano` ya trae lo guardado, así que da lo mismo), no una más estricta:
+// un menor que ya tiene adulto guardado no se frena aunque se guarde otra sección. Lo que el back no hace es
+// avisar al borrar el campo (conserva el guardado en silencio); acá sí se frena, para no engañar.
 export const validarCompletar = (plano = {}, { hoy = new Date() } = {}) => {
   const errores = {};
   validarTipos(plano, SECCIONES_OPCIONALES, errores, hoy);

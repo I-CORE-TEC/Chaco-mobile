@@ -43,6 +43,7 @@ function loadScreen(relative, mocks, extra = {}) {
     name => {
       // El interruptor es un componente real y compartido: se carga con los mismos mocks que la pantalla.
       if (name === '../components/InterruptorSiNo' && !mocks[name]) mocks[name] = {__esModule: true, default: loadScreen('src/components/InterruptorSiNo.js', mocks)};
+      if (name === '../components/IdentidadEnConflicto' && !mocks[name]) mocks[name] = {__esModule: true, default: loadScreen('src/components/IdentidadEnConflicto.js', mocks)};
       assert.ok(mocks[name], 'Missing screen mock: ' + name);
       return mocks[name];
     }, module, module.exports);
@@ -118,6 +119,7 @@ async function entorno(rutas) {
   const llegadas = runtime.load('./emergenciaLlegadas');
   const mocks = {
     react: React, 'react-native': native, '@expo/vector-icons': {Ionicons: 'Ionicons'},
+    '../context/AuthContext': {useAuth: () => ({user: {nombre: 'Ana López'}})},
     '../context/ThemeContext': {useTheme: () => ({theme, typography})},
     '../context/ToastContext': {useToast: () => ({showToast: value => toasts.push(value), showAlert: (...args) => alerts.push(args)})},
     '../theme/statusBadges': loadPure('src/theme/statusBadges.js'),
@@ -185,6 +187,18 @@ test('Alojar: propone el sector de las camas de la familia, confirma antes y man
     assert.deepEqual(ui.eventos, [['cerrado', {cierre: 'alojar', resultado: 'hecho', estado: 'ALOJADO', total_alojado: 3, liberadas: 1}]]);
     assert.deepEqual(plano(ui.toasts.at(-1)), {type: 'success', message: 'Familia alojada · 3 personas. Se liberó 1 cama reservada.'});
     assert.deepEqual(ui.enviando, [true, false]);
+  } finally { await ui.close(); }
+});
+
+test('Alojar (A1): ya no pide ni manda el encargado; muestra «Recibe: <usuario logueado>»', async () => {
+  const ui = await montarCierre(rutasCierre(() => response(200, {estado: 'ALOJADO', total_alojado: 3, liberadas: 0})));
+  try {
+    assert.ok(ui.labels().includes('Recibe: Ana López'));
+    assert.ok(!ui.labels().some(l => /Quién recibe/.test(l)), 'no hay campo de texto para el encargado');
+    await ui.pressButton('Alojar a la familia');
+    await ui.aceptarAlerta('Alojar');
+    const [post] = posts(ui.calls);
+    assert.ok(!('encargado' in post.body));
   } finally { await ui.close(); }
 });
 
@@ -463,6 +477,49 @@ test('Puerta: 400 `plazas` (las camas se ocuparon) pasa a «Avisar a la mesa» c
     assert.deepEqual(ui.eventos, [['avisado', '2026-000191']]);
     const uuids = posts(ui.calls).map(c => c.body.uuid_cliente);
     assert.equal(new Set(uuids).size, 3, 'cada 400 olvida el uuid: no se creó nada');
+  } finally { await ui.close(); }
+});
+
+test('Puerta (A3): el 400 persona_registrada pregunta «¿Es esa persona?»; «es esa persona» reenvía sin nombre ni apellido; «es otra» manda identidad_en_conflicto', async () => {
+  const conflicto = {code: 'VALIDACION', detail: 'DNI registrado.', dni: ['Ese DNI ya está registrado como otra persona.'], persona_registrada: {apellido: 'FARIÑA', nombre: 'Joaquin'}};
+  for (const [boton, esperado] of [['Es esa persona', {nombre: undefined, apellido: undefined, identidad_en_conflicto: undefined}],
+    ['Es otra persona', {nombre: 'Pedro', apellido: 'Gómez', identidad_en_conflicto: true}]]) {
+    let paso = 0;
+    const ui = await montarPuerta((call) => { paso += 1; return paso === 1 ? response(400, conflicto) : response(201, INGRESO); });
+    try {
+      await ui.llenar();
+      await ui.escribir('Nombre', 'Pedro');
+      await ui.escribir('Apellido', 'Gómez');
+      await ui.pressButton('Ingresar igual');
+      await ui.aceptarAlerta('Ingresar igual');
+      assert.ok(ui.titulos().includes('Es esa persona') && ui.titulos().includes('Es otra persona'), 'la pregunta tiene salida');
+      assert.ok(ui.labels().includes('Ese DNI ya está registrado como FARIÑA, Joaquin. ¿Es esa persona?'));
+      await ui.pressButton(boton);
+      const envios = posts(ui.calls);
+      assert.equal(envios.length, 2, 'responder reenvía en el mismo toque, sin volver a preguntar');
+      const cuerpo = envios[1].body;
+      assert.deepEqual([cuerpo.nombre, cuerpo.apellido, cuerpo.identidad_en_conflicto], [esperado.nombre, esperado.apellido, esperado.identidad_en_conflicto]);
+      assert.deepEqual(ui.eventos.map(e => e[0]), ['ingresado']);
+    } finally { await ui.close(); }
+  }
+});
+
+test('Puerta (A3): «Cancelar» cierra la pregunta sin mandar; (M2) el teléfono inválido se marca bajo el campo y no manda', async () => {
+  const conflicto = {code: 'VALIDACION', detail: 'x', dni: ['Ese DNI ya está registrado como otra persona.'], persona_registrada: {apellido: 'FARIÑA', nombre: 'Joaquin'}};
+  const ui = await montarPuerta(() => response(400, conflicto));
+  try {
+    await ui.llenar();
+    await ui.escribir('Teléfono de contacto', '123');
+    await ui.pressButton('Ingresar igual');
+    assert.equal(ui.calls.length, 0, 'el teléfono de 3 dígitos no sale');
+    assert.ok(ui.labels().includes('Ingresá un teléfono de 8 a 15 dígitos.'), 'el error va debajo del campo');
+    await ui.escribir('Teléfono de contacto', '3624000000');
+    await ui.pressButton('Ingresar igual');
+    await ui.aceptarAlerta('Ingresar igual');
+    assert.ok(ui.titulos().includes('Es esa persona'));
+    await ui.pressButton('Cancelar');
+    assert.ok(!ui.titulos().includes('Es esa persona'));
+    assert.equal(posts(ui.calls).length, 1);
   } finally { await ui.close(); }
 });
 

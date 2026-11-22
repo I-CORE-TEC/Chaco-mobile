@@ -3,6 +3,7 @@
 // a cargar bien antes de encolar. Las claves de los errores son las del contrato (las mismas que
 // devuelve el 400 VALIDACION), así la pantalla muestra igual un error local y uno del servidor.
 import { MENSAJE_DNI_INVALIDO, cleanDigits, isValidDni, normalizeDateText } from '../utils/dni';
+import { errorDeTelefono } from '../utils/telefono';
 
 export const MAX_TRASLADO_OTRO = 120;
 export const MAX_DIRECCION = 240;
@@ -226,13 +227,17 @@ export const validarCaso = (datos = {}) => {
   }
 
   if (!isValidDni(datos.dni)) agregar('dni', MENSAJE_DNI_INVALIDO);
-  if (!personaConfirmada(datos.consulta, datos)) {
+  // «Es esa persona» (400 `persona_registrada`): se manda solo el DNI y el back usa el legajo.
+  if (!personaConfirmada(datos.consulta, datos) && datos.es_misma_persona !== true) {
     if (!texto(datos.nombre)) agregar('nombre', 'Escribí el nombre del responsable.');
     if (!texto(datos.apellido)) agregar('apellido', 'Escribí el apellido del responsable.');
   }
   if (texto(datos.fecha_nacimiento) && !fechaValida(datos.fecha_nacimiento)) {
     agregar('fecha_nacimiento', 'La fecha de nacimiento no es válida: tiene que ser DD/MM/AAAA.');
   }
+
+  const errorTelefono = errorDeTelefono(datos.telefono);
+  if (errorTelefono) agregar('telefono', errorTelefono);
 
   const total = totalDeclarado(datos);
   if (total < 1) agregar('total', 'Cargá al menos una persona: el responsable también cuenta.');
@@ -268,12 +273,13 @@ export const hayErrores = (errores) => !!errores && Object.keys(errores).length 
 // Lo del borrador → lo que recibe enviarCaso (las claves del §6). Los contadores van enteros,
 // los avisos booleanos, el DNI solo con números; lo vacío lo descarta enviarCaso.
 export const datosDelCaso = (datos = {}) => {
+  const mismaPersona = datos.es_misma_persona === true;
   const caso = {
     traslado: texto(datos.traslado),
     traslado_otro: texto(datos.traslado) === 'OTRA' ? texto(datos.traslado_otro) : '',
     dni: cleanDigits(datos.dni),
-    nombre: texto(datos.nombre),
-    apellido: texto(datos.apellido),
+    nombre: mismaPersona ? '' : texto(datos.nombre),
+    apellido: mismaPersona ? '' : texto(datos.apellido),
     fecha_nacimiento: texto(datos.fecha_nacimiento),
     telefono: texto(datos.telefono),
     documento_extraviado: datos.documento_extraviado === true,
@@ -282,6 +288,8 @@ export const datosDelCaso = (datos = {}) => {
     localidad: datos.localidad ?? null,
     observaciones: texto(datos.observaciones),
   };
+  // «Es otra persona»: el back crea el caso con la persona registrada y deja la identidad a revisar.
+  if (datos.identidad_en_conflicto === true && !mismaPersona) caso.identidad_en_conflicto = true;
   // Lo que el grupo no permite (oculto en la pantalla) va en 0 / false aunque el borrador lo conserve.
   const visible = asistenciaVisible(datos);
   CANTIDADES.forEach(({ clave }) => { caso[clave] = aCantidad(datos[clave]); });
@@ -295,6 +303,41 @@ export const datosDelCaso = (datos = {}) => {
   return caso;
 };
 
+// `persona_registrada` del 400 (Cambio 486): { apellido, nombre } de quien ya tiene ese DNI, o null.
+export const personaRegistradaDe = (valor) => {
+  if (!valor || typeof valor !== 'object' || Array.isArray(valor)) return null;
+  const apellido = texto(valor.apellido);
+  const nombre = texto(valor.nombre);
+  return apellido || nombre ? { apellido, nombre } : null;
+};
+
+// ¿Los errores traen la pregunta «¿Es esa persona?»? Devuelve la persona o null.
+export const personaEnConflicto = (errores) => personaRegistradaDe(errores?.persona_registrada);
+
+export const OPCIONES_IDENTIDAD = ['misma', 'otra'];
+
+// La respuesta de la guardia al 400 `persona_registrada`, sobre los datos del formulario:
+// - 'misma': es esa persona → se manda sin nombre ni apellido (se muestran los del registro);
+// - 'otra': el DNI es correcto pero es otra persona → `identidad_en_conflicto`, con el nombre cargado.
+export const resolverIdentidad = (datos = {}, opcion, persona = null) => {
+  if (opcion === 'misma') {
+    return {
+      ...datos,
+      es_misma_persona: true,
+      identidad_en_conflicto: false,
+      nombre: persona?.nombre || datos.nombre || '',
+      apellido: persona?.apellido || datos.apellido || '',
+    };
+  }
+  if (opcion === 'otra') return { ...datos, es_misma_persona: false, identidad_en_conflicto: true };
+  return datos;
+};
+
+// Cambiar el DNI (o el nombre tras «es esa persona») deja sin efecto lo que se había respondido.
+export const sinRespuestaDeIdentidad = (datos = {}) => (
+  datos.es_misma_persona || datos.identidad_en_conflicto
+    ? { ...datos, es_misma_persona: false, identidad_en_conflicto: false } : datos);
+
 // El cuerpo de un 400 VALIDACION (§6, «Errores del envío») → { campo: [mensajes] }. `detail` y
 // `code` no son campos; `non_field_errors` se guarda solo si ningún campo trajo su mensaje.
 export const erroresDelServidor = (payload) => {
@@ -302,6 +345,12 @@ export const erroresDelServidor = (payload) => {
   const errores = {};
   Object.entries(payload).forEach(([clave, valor]) => {
     if (['detail', 'code', 'non_field_errors'].includes(clave)) return;
+    if (clave === 'persona_registrada') {
+      // No es un mensaje: es la persona que ya tiene ese DNI, para preguntar «¿Es esa persona?».
+      const persona = personaRegistradaDe(valor);
+      if (persona) errores.persona_registrada = persona;
+      return;
+    }
     const mensajes = (Array.isArray(valor) ? valor : [valor]).filter((m) => typeof m === 'string' && m.trim());
     if (mensajes.length) errores[clave] = mensajes;
   });
@@ -315,6 +364,7 @@ export const erroresDelServidor = (payload) => {
 
 // Errores → lista para mostrar, con la etiqueta del campo adelante.
 export const listaDeErrores = (errores = {}) => Object.entries(errores || {})
+  .filter(([campo]) => campo !== 'persona_registrada')
   .flatMap(([campo, mensajes]) => (Array.isArray(mensajes) ? mensajes : [mensajes])
     .map((mensaje) => ({ campo, etiqueta: ETIQUETAS[campo] || campo, texto: String(mensaje) })));
 

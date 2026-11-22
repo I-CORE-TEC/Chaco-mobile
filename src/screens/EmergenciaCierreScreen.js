@@ -4,10 +4,11 @@ import { Ionicons } from '@expo/vector-icons';
 import TextInput from '../components/FormInput';
 import InterruptorSiNo from '../components/InterruptorSiNo';
 import CustomButton from '../components/CustomButton';
+import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { useToast } from '../context/ToastContext';
 import {
-  MAX_AULA, MAX_ENCARGADO, MAX_MOTIVO_CANCELAR, MAX_OBSERVACION, MAX_TARJETA, MOTIVOS_DIFERENCIA, TEXTO_SIN_RED,
+  MAX_AULA, MAX_MOTIVO_CANCELAR, MAX_OBSERVACION, MAX_TARJETA, MOTIVOS_DIFERENCIA, TEXTO_SIN_RED,
   abrirSesion, alojar, cancelar, cargarCamas, cerrarDiferencia, clasificarErrorLlegada, escucharRed, hayConexion,
   sectorDeLaFamilia, textoDeLiberadas, validarAlojar, validarCancelar, validarDiferencia,
 } from '../services/emergenciaLlegadas';
@@ -68,6 +69,9 @@ export default function EmergenciaCierreScreen({
   onCerrado, onConflicto, onNoEncontrado, onSinModulo, onEnviando,
 }) {
   const { theme, typography } = useTheme();
+  const { user } = useAuth();
+  // Quién recibe es el usuario logueado: el back lo registra solo (ya no se pregunta ni se manda).
+  const quienRecibe = user?.nombre || user?.username || 'vos';
   const { showAlert, showToast } = useToast();
   const config = CIERRES[cierre];
   const [sesion, setSesion] = useState(null);
@@ -88,7 +92,6 @@ export default function EmergenciaCierreScreen({
   const [aula, setAula] = useState('');
   const [tarjeta, setTarjeta] = useState(false);
   const [tarjetaNumero, setTarjetaNumero] = useState('');
-  const [encargado, setEncargado] = useState('');
   // Diferencia y cancelar.
   const [motivo, setMotivo] = useState(cierre === 'cancelar' ? '' : null);
   const [observacion, setObservacion] = useState('');
@@ -178,7 +181,7 @@ export default function EmergenciaCierreScreen({
   }, [esperando]);
 
   const datosDelCierre = () => (cierre === 'alojar'
-    ? { sector, aula, tarjeta_entregada: tarjeta, tarjeta_numero: tarjetaNumero, encargado }
+    ? { sector, aula, tarjeta_entregada: tarjeta, tarjeta_numero: tarjetaNumero }
     : { motivo, observacion });
   const validar = () => {
     if (cierre === 'alojar') return validarAlojar(datosDelCierre());
@@ -360,10 +363,9 @@ export default function EmergenciaCierreScreen({
             </>
           ) : null}
           {mensajes('tarjeta_numero')}
-          <Text style={[etiqueta, styles.separado]}>Quién recibe (opcional)</Text>
-          <TextInput value={encargado} editable={!fijo} maxLength={MAX_ENCARGADO} accessibilityLabel="Quién recibe"
-            placeholder="Vacío: vos" placeholderTextColor={theme.colors.textSoft} onChangeText={cambiar(setEncargado, 'encargado')} style={caja('encargado')} />
-          {mensajes('encargado')}
+          <Text accessibilityLabel={`Recibe: ${quienRecibe}`} style={[styles.texto, styles.separado, { color: theme.colors.text, fontFamily: typography.medium }]}>
+            {`Recibe: ${quienRecibe}`}
+          </Text>
         </View>
       ) : null}
 
