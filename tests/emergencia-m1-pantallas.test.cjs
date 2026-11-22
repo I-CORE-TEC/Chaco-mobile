@@ -340,7 +340,7 @@ test('Formulario 1: el sexo del legajo pisa el que ya había elegido, y un legaj
     await ui.press('Sumar Adultos · Mujeres');
     await ui.escribir('Dirección o referencia', 'Calle 1');
     await ui.pressButton('Enviar');
-    assert.equal(ui.cola.calls.encolados[0][1].datos.sexo, 'F', 'se envía el sexo del legajo, no el que estaba en el borrador');
+    assert.equal(ui.cola.calls.encolados[0][1].datos.sexo, 'F', 'el borrador encolado lleva el sexo del legajo, no el que estaba antes (no se mira la consulta: no manda el sexo)');
     assert.equal(ui.cola.calls.encolados[0][1].datos.consulta.origen, 'legajo');
   } finally { await ui.close(); }
 
@@ -429,6 +429,84 @@ test('Formulario 1: sin el extremo de sugerencias (back anterior, 404) o con la 
       assert.equal(ui.input('DNI del responsable').props.value, '491037');
     } finally { await ui.close(); }
   }
+});
+
+test('Formulario 1: con hay_mas: false no vuelve a pedir: filtra en el cliente, y una respuesta vacía tampoco se repite', async () => {
+  const ui = await montarFormulario({sugerir: () => ({resultados: [{apellido: 'Acevedo', nombre: 'Adriana', dni: '49103788'}, {apellido: 'Paz', nombre: 'Luis', dni: '49103900'}], hay_mas: false})});
+  try {
+    await ui.escribir('DNI del responsable', '49103');
+    await esperar(600);
+    assert.deepEqual(ui.sugeridos, ['49103']);
+    await ui.escribir('DNI del responsable', '491037');
+    await esperar(600);
+    assert.deepEqual(ui.sugeridos, ['49103'], 'no pide otra vez');
+    assert.equal(ui.porLabel('Elegir a Acevedo, Adriana, DNI 49.103.788').length > 0, true);
+    assert.equal(ui.porLabel('Elegir a Paz, Luis, DNI 49.103.900').length, 0, 'filtrada por lo tecleado');
+    await ui.escribir('DNI del responsable', '491030');
+    await esperar(600);
+    assert.deepEqual(ui.sugeridos, ['49103'], 'vacía y completa: no se repite');
+  } finally { await ui.close(); }
+});
+
+test('Formulario 1: con hay_mas: true avisa «Hay más coincidencias» y sigue pidiendo al escribir', async () => {
+  const ui = await montarFormulario({sugerir: () => ({resultados: [{apellido: 'Acevedo', nombre: 'Adriana', dni: '49103788'}], hay_mas: true})});
+  try {
+    await ui.escribir('DNI del responsable', '49103');
+    await esperar(600);
+    await renderer.act(async () => { await esperar(); });
+    assert.ok(ui.labels().includes('Hay más coincidencias: seguí escribiendo.'));
+    await ui.escribir('DNI del responsable', '491037');
+    await esperar(600);
+    assert.deepEqual(ui.sugeridos, ['49103', '491037']);
+  } finally { await ui.close(); }
+});
+
+test('Formulario 1: las respuestas de sugerencias fuera de orden se descartan, y un error de red no rompe el campo', async () => {
+  const pendientes = {};
+  const ui = await montarFormulario({sugerir: (dni) => new Promise((resolve, reject) => { pendientes[dni] = {resolve, reject}; })});
+  try {
+    await ui.escribir('DNI del responsable', '49103');
+    await esperar(600);
+    await ui.escribir('DNI del responsable', '491037');
+    await esperar(600);
+    assert.deepEqual(ui.sugeridos, ['49103', '491037']);
+    // Responde primero la nueva y después la vieja: la vieja no pisa.
+    await renderer.act(async () => { pendientes['491037'].resolve({resultados: [{apellido: 'Acevedo', nombre: 'Adriana', dni: '49103788'}], hay_mas: true}); await esperar(); });
+    await renderer.act(async () => { pendientes['49103'].resolve({resultados: [{apellido: 'Paz', nombre: 'Luis', dni: '49103900'}], hay_mas: true}); await esperar(); });
+    assert.equal(ui.porLabel('Elegir a Acevedo, Adriana, DNI 49.103.788').length > 0, true);
+    assert.equal(ui.porLabel('Elegir a Paz, Luis, DNI 49.103.900').length, 0);
+    // Error de red (sin status): sin sugerencias, el campo sigue y no hay pausa (se vuelve a intentar).
+    await ui.escribir('DNI del responsable', '4910378');
+    await esperar(600);
+    await renderer.act(async () => { pendientes['4910378'].reject(Object.assign(new Error('Network'), {network: true})); await esperar(); });
+    assert.equal(ui.tree.root.findAll(n => typeof n.props?.accessibilityLabel === 'string' && n.props.accessibilityLabel.startsWith('Elegir a ')).length, 0);
+    assert.equal(ui.input('DNI del responsable').props.value, '4910378');
+  } finally { await ui.close(); }
+});
+
+test('Formulario 1: el 429 con Retry-After mayor a un minuto pausa lo que pidió el servidor', async () => {
+  const ui = await montarFormulario({sugerir: () => { throw Object.assign(new Error('x'), {status: 429, retryAfter: 120000}); }});
+  try {
+    await ui.escribir('DNI del responsable', '49103');
+    await esperar(600);
+    assert.equal(ui.sugeridos.length, 1);
+    await ui.escribir('DNI del responsable', '491037');
+    await esperar(600);
+    assert.equal(ui.sugeridos.length, 1, 'en pausa');
+  } finally { await ui.close(); }
+});
+
+test('Formulario 1: no pide sugerencias mientras se consulta el DNI ni tras el no_en_legajo (pidiendo el sexo)', async () => {
+  const ui = await montarFormulario({sugerir: () => ({resultados: [], hay_mas: true})});
+  try {
+    await ui.escribir('DNI del responsable', '30111222');
+    await esperar(600);
+    assert.deepEqual(ui.sugeridos, [], 'con 8 dígitos no se sugiere');
+    await ui.pressButton('Buscar persona');
+    assert.ok(ui.labels().some(l => l.startsWith('No figura en los legajos de DATAÑACH')));
+    await esperar(600);
+    assert.deepEqual(ui.sugeridos, [], 'tras el no_en_legajo no hay pedido de más');
+  } finally { await ui.close(); }
 });
 
 test('Formulario 1: el escaneo del DNI completa la identidad', async () => {

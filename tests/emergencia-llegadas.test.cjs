@@ -440,3 +440,50 @@ test('sesión: un 401 del token viejo (otra persona ya entró) no cierra la sesi
   assert.deepEqual(calls.map(c => c.auth), ['Token tok-2'], 'salió con su token, no con el de quien entró');
   assert.equal(await r.api.getBecasToken(), 'tok-3', 'el 401 del token viejo no cierra la sesión nueva');
 });
+
+test('integrantes: id de la fila y puede_quitarse se leen (aditivas); sin ellas, no se ofrece quitar', async () => {
+  const {l} = await preparar();
+  const d = l.normalizarIntegrantes({...INTEGRANTES, integrantes: [FILA(1, {id: 311}), FILA(8, {id: 318, puede_quitarse: true}), FILA(9)]});
+  igual(d.integrantes.map(i => [i.n, i.id, i.puede_quitarse]), [[1, 311, false], [8, 318, true], [9, null, false]]);
+});
+
+test('próximo número: el mayor n + 1, no total_declarado + 1 (hay huecos tras quitar a alguien)', async () => {
+  const {l} = await preparar();
+  const conHueco = l.normalizarIntegrantes({...INTEGRANTES, integrantes: [FILA(1), FILA(2), FILA(4)], total_declarado: 3});
+  assert.equal(l.proximoNumero(conHueco), 5);
+  assert.equal(l.proximoNumero({integrantes: [], total_declarado: 3}), 4, 'sin filas cargadas, el contador + 1');
+});
+
+test('quitar persona: POST con el id de la fila; ya_estaba_quitada es éxito; el reintento manda el mismo cuerpo', async () => {
+  const {r, l, sesion} = await preparar();
+  let intento = 0;
+  const calls = router(r, () => { intento += 1; return intento === 1 ? fallaDeRed() : response(200, {n: 8, total_declarado: 7, ya_estaba_quitada: intento === 3}); });
+  const fila = {n: 8, id: 318};
+  igual(await clasificacion(l.quitarPersona(sesion, 184, fila)).then(c => c.tipo), 'reintentable');
+  igual(await l.quitarPersona(sesion, 184, fila), {n: 8, total_declarado: 7, ya_estaba_quitada: false});
+  igual(await l.quitarPersona(sesion, 184, fila), {n: 8, total_declarado: 7, ya_estaba_quitada: true});
+  igual(calls.map(c => [c.method, c.url, c.body]), [0, 1, 2].map(() => ['POST', '/api/emergencia/casos/184/integrantes/8/quitar/', {id: 318}]));
+});
+
+test('quitar persona: 400 orden muestra el mensaje del back; 404 y 409 se clasifican', async () => {
+  const {r, l, sesion} = await preparar();
+  router(r, () => response(400, {orden: ['Solo se puede quitar a quien se agregó en la puerta y todavía no ingresó.']}));
+  igual(await clasificacion(l.quitarPersona(sesion, 184, {n: 1, id: 311})).then(c => [c.tipo, c.mensaje]),
+    ['rechazo', 'Solo se puede quitar a quien se agregó en la puerta y todavía no ingresó.']);
+  router(r, () => response(404, {detail: 'No encontrado.'}));
+  assert.equal((await clasificacion(l.quitarPersona(sesion, 184, {n: 8, id: 318}))).tipo, 'no_encontrado');
+  router(r, () => response(409, {detail: 'Cerrado.', estado_actual: 'CERRADO'}));
+  assert.equal((await clasificacion(l.quitarPersona(sesion, 184, {n: 8, id: 318}))).tipo, 'conflicto');
+});
+
+test('búsqueda: puede_ingresar_igual y puede_avisar_a_la_mesa deciden los botones; sin ellas (back anterior) todo como antes', async () => {
+  const {l} = await preparar();
+  const sin = l.normalizarBusqueda({...BUSQUEDA, resultado: 'SIN_DERIVACION', derivacion: null});
+  igual(l.accionesSinDerivacion(sin), {ingresar: true, avisar: true});
+  const edificios = l.normalizarBusqueda({...BUSQUEDA, resultado: 'SIN_DERIVACION', derivacion: null, puede_ingresar_igual: false, puede_avisar_a_la_mesa: true});
+  igual(l.accionesSinDerivacion(edificios), {ingresar: false, avisar: true});
+  const completo = l.normalizarBusqueda({...BUSQUEDA, resultado: 'SIN_DERIVACION', derivacion: null, puede_ingresar_igual: true, puede_avisar_a_la_mesa: true});
+  igual(l.accionesSinDerivacion(completo), {ingresar: true, avisar: true});
+  igual(l.accionesSinDerivacion({...completo, plazas_libres: 0}), {ingresar: false, avisar: true}, 'la bandera no mira las camas');
+  igual(l.accionesSinDerivacion({...completo, puede_avisar_a_la_mesa: false}), {ingresar: true, avisar: false});
+});

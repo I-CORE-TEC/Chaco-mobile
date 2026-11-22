@@ -234,6 +234,24 @@ test('Buscar: SIN_DERIVACION muestra el mensaje y ofrece «Ingresar igual» solo
   } finally { await ui.close(); }
 });
 
+test('Buscar: las banderas del back (Cambio 532) deciden «Ingresar igual» y «Avisar a la mesa», y sin ninguna lo dice', async () => {
+  let resultado = {...SIN_DERIVACION, puede_ingresar_igual: false, puede_avisar_a_la_mesa: true};
+  const ui = await montarBuscar(() => response(200, resultado));
+  try {
+    await ui.escribir('DNI', '30111222');
+    await ui.pressButton('Buscar');
+    assert.ok(!ui.button('Ingresar igual'), 'con alcance Edificios la bandera lo oculta aunque haya camas');
+    assert.ok(ui.button('Avisar a la mesa'));
+    resultado = {...SIN_DERIVACION, puede_ingresar_igual: true, puede_avisar_a_la_mesa: true};
+    await ui.pressButton('Buscar');
+    assert.ok(ui.button('Ingresar igual') && ui.button('Avisar a la mesa'));
+    resultado = {...SIN_DERIVACION, puede_ingresar_igual: false, puede_avisar_a_la_mesa: false};
+    await ui.pressButton('Buscar');
+    assert.ok(!ui.button('Ingresar igual') && !ui.button('Avisar a la mesa'));
+    assert.ok(ui.labels().some(l => l.startsWith('Tu usuario no puede ingresar a la familia ni avisar a la mesa')));
+  } finally { await ui.close(); }
+});
+
 test('Buscar: ALOJADA muestra el mensaje, si es acá y dónde (solo si viene)', async () => {
   const ui = await montarBuscar(() => response(200, {resultado: 'ALOJADA', dni: '30111222', plazas_libres: 2,
     mensaje: 'Alojada en Club Sarmiento desde el 12/11.', derivacion: null, alojada_aca: true, alojada_en: 'Club Sarmiento',
@@ -731,6 +749,61 @@ test('Integrantes: «Agregar persona» confirma, manda con uuid y recarga; el re
     const tercero = ui.calls.filter(c => c.method === 'POST')[2];
     assert.notEqual(tercero.body.uuid_cliente, a.body.uuid_cliente, 'la siguiente persona es otro pedido');
   } finally { await ui.close(); }
+});
+
+test('Integrantes: «Agregar persona» numera con el mayor n + 1, no con total_declarado + 1 (hay huecos tras quitar)', async () => {
+  const ui = await montarIntegrantes(() => response(200, {...INTEGRANTES, integrantes: [CONFIRMADA, FILA(2), FILA(4)], total_declarado: 3}));
+  try {
+    await ui.pressButton('Agregar persona');
+    assert.match(ui.alerts.at(-1)[1], /persona 5 /);
+  } finally { await ui.close(); }
+});
+
+test('Integrantes: «Quitar persona» solo en las filas con puede_quitarse, con confirmación, POST con el id de la fila y recarga', async () => {
+  let quitada = false;
+  const lista = () => ({...INTEGRANTES, integrantes: quitada ? [CONFIRMADA, FILA(2, {id: 312})] : [CONFIRMADA, FILA(2, {id: 312}), FILA(3, {id: 313, puede_quitarse: true})],
+    total_declarado: quitada ? 2 : 3});
+  const ui = await montarIntegrantes((call) => {
+    if (call.method === 'POST') { quitada = true; return response(200, {n: 3, total_declarado: 2, ya_estaba_quitada: false}); }
+    return response(200, lista());
+  });
+  try {
+    assert.equal(ui.tree.root.findAllByType('CustomButton').filter(b => b.props.title === 'Quitar persona').length, 1);
+    await ui.pressButton('Quitar persona');
+    assert.equal(ui.alerts.at(-1)[0], 'Quitar persona');
+    assert.equal(api(ui.calls).filter(c => c.method === 'POST').length, 0, 'antes de confirmar no sale nada');
+    await ui.aceptarAlerta('Quitar');
+    const [post] = api(ui.calls).filter(c => c.method === 'POST');
+    assert.equal(post.url, '/api/emergencia/casos/184/integrantes/3/quitar/');
+    assert.deepEqual(plano(post.body), {id: 313});
+    assert.equal(ui.toasts.at(-1).message, 'Se quitó la persona 3 de la familia.');
+    assert.ok(ui.labels().includes('1 de 2 confirmadas'));
+    assert.ok(!ui.button('Quitar persona'), 'recargó: la fila ya no está');
+    assert.deepEqual(ui.enviando, [true, false]);
+  } finally { await ui.close(); }
+});
+
+test('Integrantes: quitar con ya_estaba_quitada es éxito silencioso; 400 y 409 se muestran; sin puede_quitarse o en lectura no hay botón', async () => {
+  let respuesta = response(200, {n: 3, total_declarado: 2, ya_estaba_quitada: true});
+  const fila = FILA(3, {id: 313, puede_quitarse: true});
+  const ui = await montarIntegrantes((call) => (call.method === 'POST' ? respuesta : response(200, {...INTEGRANTES, integrantes: [CONFIRMADA, fila], total_declarado: 3})));
+  try {
+    await ui.pressButton('Quitar persona');
+    await ui.aceptarAlerta('Quitar');
+    assert.equal(ui.toasts.length, 0, 'ya estaba quitada: sin aviso');
+    respuesta = response(400, {orden: ['Solo se puede quitar a quien se agregó en la puerta y todavía no ingresó.']});
+    await ui.pressButton('Quitar persona');
+    await ui.aceptarAlerta('Quitar');
+    assert.ok(ui.labels().includes('Solo se puede quitar a quien se agregó en la puerta y todavía no ingresó.'));
+    respuesta = response(409, {detail: 'La mesa canceló la derivación.', estado_actual: 'EN_GESTION'});
+    await ui.pressButton('Quitar persona');
+    await ui.aceptarAlerta('Quitar');
+    assert.equal(ui.eventos.at(-1)[0], 'conflicto');
+  } finally { await ui.close(); }
+  const lectura = await montarIntegrantes(() => response(200, {...INTEGRANTES, caso: {...CASO, estado: 'ALOJADO'}, integrantes: [CONFIRMADA, fila]}));
+  try {
+    assert.ok(!lectura.button('Quitar persona'), 'con la familia alojada no se quita');
+  } finally { await lectura.close(); }
 });
 
 // ---- EmergenciaApp: el recorrido y el router por estado_actual ----

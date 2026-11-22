@@ -4,7 +4,7 @@ import { getBecasToken, getStoredBecasUser } from './becasApi';
 import {
   aceptarDerivacion, agregarIntegrante, alojarFamilia, avisarALaMesa, buscarFamilia, cancelarIngreso, cerrarConDiferencia,
   completarFichaIntegrante, confirmarIntegrante, errorObsoleto, esConflictoDeEstado, esUuidEnUso, getIntegrante, getIntegrantes,
-  getPlazas, idDeDerivacion, ingresoDirecto, rechazarDerivacion,
+  getPlazas, idDeDerivacion, ingresoDirecto, quitarIntegrante, rechazarDerivacion,
 } from './emergenciaApi';
 import { esSinModulo } from './sinModulo';
 import { CANTIDADES, datosDelCaso, datosIniciales, erroresDelServidor, validarCaso } from '../utils/emergencia';
@@ -136,8 +136,18 @@ export const normalizarBusqueda = (payload) => {
     alojada_aca: typeof datos.alojada_aca === 'boolean' ? datos.alojada_aca : null,
     alojada_en: textoPlano(datos.alojada_en),
     alojada_desde: datos.alojada_desde || null,
+    // Cambio 532 (aditivas): `null` con un back que no las manda.
+    puede_ingresar_igual: typeof datos.puede_ingresar_igual === 'boolean' ? datos.puede_ingresar_igual : null,
+    puede_avisar_a_la_mesa: typeof datos.puede_avisar_a_la_mesa === 'boolean' ? datos.puede_avisar_a_la_mesa : null,
   };
 };
+
+// Qué botones de M2-6 ofrece una búsqueda SIN_DERIVACION (§13.2): el back dice el alcance; la app solo
+// suma las camas. Con un back que no manda las banderas (`null`) se ofrecen como antes.
+export const accionesSinDerivacion = (busqueda) => ({
+  ingresar: busqueda?.puede_ingresar_igual !== false && (busqueda?.plazas_libres ?? 0) >= 1,
+  avisar: busqueda?.puede_avisar_a_la_mesa !== false,
+});
 
 // Qué pantalla sigue a una búsqueda (§13.2): 'derivacion' (PENDIENTE: aceptar o rechazar),
 // 'integrantes' (ACEPTADA), 'sin_derivacion' o 'alojada'. Un resultado que no se entiende es
@@ -200,8 +210,16 @@ const normalizarIntegrante = (fila) => {
     parentesco: textoPlano(fila.parentesco),
     confirmada_en: fila.confirmada_en || null,
     egresado_en: fila.egresado_en || null,
+    // Cambios 539 y 537 (aditivas): la clave de la fila y si «Quitar persona» corresponde.
+    id: fila.id ?? null,
+    puede_quitarse: fila.puede_quitarse === true,
   };
 };
+
+// El número de la próxima persona que se suma: el mayor `n` de las filas + 1 (la numeración no se compacta:
+// tras una baja hay huecos y `total_declarado + 1` mentiría). Sin filas cargadas, el contador + 1.
+export const proximoNumero = ({ integrantes = [], total_declarado: total = 0 } = {}) => (
+  integrantes.length ? Math.max(...integrantes.map((i) => i.n)) + 1 : (total || 0) + 1);
 
 // Cómo se rotula una persona de la familia: la confirmada, con su nombre; la persona 1 sin confirmar,
 // con el responsable que cargó el caso; si no, «Persona N». `dni`: el de quien se muestra, o ''.
@@ -518,6 +536,24 @@ export const agregarPersona = async (sesion, casoId) => {
     error.uuid = uuid;
     throw error;
   }
+};
+
+// «Quitar persona» (§13.5): sin uuid. Repetirla con el mismo `id` es seguro (200 con `ya_estaba_quitada`).
+export const quitarPersona = async (sesion, casoId, integrante) => {
+  let payload;
+  try {
+    payload = await conSesion(sesion, (op) => quitarIntegrante(casoId, integrante.n, { id: integrante.id }, op),
+      { timeoutMs: LIMITES.accionMs, campos: ['orden'] });
+  } catch (error) {
+    // 400 `orden` (§13.5): el mensaje del back dice por qué no se puede quitar; se muestra tal cual.
+    const orden = error?.status === 400 && error?.payload && typeof error.payload === 'object' ? error.payload.orden : null;
+    const mensaje = (Array.isArray(orden) ? orden : [orden]).find((m) => typeof m === 'string' && m.trim());
+    if (mensaje && error.clasificacion && ['validacion', 'rechazo'].includes(error.clasificacion.tipo)) {
+      error.clasificacion = { tipo: 'rechazo', mensaje: mensaje.trim() };
+    }
+    throw error;
+  }
+  return { n: entero(payload?.n ?? integrante.n), total_declarado: entero(payload?.total_declarado), ya_estaba_quitada: payload?.ya_estaba_quitada === true };
 };
 
 // ---- Parte 2: una persona y su ficha (§13.6), el mapa de camas (§13.7) y confirmar (§13.8) ----

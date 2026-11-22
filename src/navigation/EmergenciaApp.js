@@ -325,7 +325,8 @@ export default function EmergenciaApp({ onCambiarModulo }) {
   // Sin derivación (§13.10): el Formulario 1 de la puerta con lo que dijo la búsqueda.
   const verPuerta = (accion, busqueda) => setPantalla((actual) => ({
     ...actual, vista: 'llegadas_puerta', dni: busqueda?.dni || actual.dni || '', n: (actual.n || 0) + 1,
-    puerta: { accion, plazasLibres: busqueda?.plazas_libres ?? 0, mensaje: busqueda?.mensaje || '' },
+    puerta: { accion, plazasLibres: busqueda?.plazas_libres ?? 0, mensaje: busqueda?.mensaje || '',
+      puedeIngresarIgual: busqueda?.puede_ingresar_igual ?? null, puedeAvisarALaMesa: busqueda?.puede_avisar_a_la_mesa ?? null },
   }));
   const ingresoDirecto = (caso) => {
     setEnviando(false);
@@ -446,7 +447,8 @@ export default function EmergenciaApp({ onCambiarModulo }) {
         {vista === 'llegadas_puerta' ? (
           <EmergenciaPuertaScreen key={`puerta-${pantalla.dispositivo?.id}-${pantalla.dni}-${pantalla.n}`} dispositivo={pantalla.dispositivo}
             dni={pantalla.dni} plazasLibres={pantalla.puerta?.plazasLibres ?? 0} accion={pantalla.puerta?.accion}
-            mensaje={pantalla.puerta?.mensaje || ''} onIngresado={ingresoDirecto} onAvisado={avisoALaMesa}
+            mensaje={pantalla.puerta?.mensaje || ''} puedeIngresarIgual={pantalla.puerta?.puedeIngresarIgual ?? null}
+            puedeAvisarALaMesa={pantalla.puerta?.puedeAvisarALaMesa ?? null} onIngresado={ingresoDirecto} onAvisado={avisoALaMesa}
             onNoEncontrado={llegadaNoEncontrada} onSinModulo={sinModulo} onEnviando={setEnviando} />
         ) : null}
       </View>

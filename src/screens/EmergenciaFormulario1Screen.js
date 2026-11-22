@@ -18,7 +18,9 @@ import {
   abrirBorrador, guardarBorrador, ponerFoto, quitarFoto, encolarCaso, descartar, getLocalidadesGuardadas,
 } from '../services/emergenciaCola';
 import { aJpeg } from '../utils/jpeg';
-import { cleanDigits, formatDni, isValidDni, normalizeDateText, normalizeSex, parseDniCode, tecleadoDni } from '../utils/dni';
+import {
+  cleanDigits, formatDni, isValidDni, normalizeDateText, normalizeSex, parseDniCode, pausaDeSugerencias, sugerenciasDesdeLaPrevia, tecleadoDni,
+} from '../utils/dni';
 import {
   ASISTENCIA, AVISOS, CANTIDADES, FOTOS, MAX_DIRECCION, MAX_TRASLADO_OTRO, SEXOS, TRASLADOS,
   aCantidad, asistenciaVisible, filtrarLocalidades, hayErrores, listaDeErrores, mismaIdentidad, personaConfirmada, textoDeCode,
@@ -35,6 +37,7 @@ const AUTOGUARDADO_MS = 500;
 export const SUGERENCIAS_MIN_DIGITOS = 5;
 export const SUGERENCIAS_ESPERA_MS = 450;
 export const SUGERENCIAS_PAUSA_MS = 60000;
+export const TEXTO_HAY_MAS_SUGERENCIAS = 'Hay más coincidencias: seguí escribiendo.';
 // Cambiar estos campos invalida lo que confirmó la consulta de identidad.
 const CAMPOS_IDENTIDAD = ['dni', 'sexo'];
 
@@ -65,6 +68,7 @@ export default function EmergenciaFormulario1Screen({ uuid = null, onTerminar })
   // `true` desde el 404 `no_en_legajo` hasta que cambia el DNI: recién ahí se pide el sexo.
   const [pidioSexo, setPidioSexo] = useState(false);
   const [sugerencias, setSugerencias] = useState([]);
+  const [hayMasSugerencias, setHayMasSugerencias] = useState(false);
   const [ubicando, setUbicando] = useState(false);
   const [errorUbicacion, setErrorUbicacion] = useState('');
   const [fotoEnProceso, setFotoEnProceso] = useState(null);
@@ -82,6 +86,7 @@ export default function EmergenciaFormulario1Screen({ uuid = null, onTerminar })
   const consultaConSexo = useRef(false);
   const pedidoSugerencias = useRef(0);
   const sugerenciasPausadasHasta = useRef(0);
+  const sugerenciasPrevias = useRef(null);
   const enviandoRef = useRef(false);
   datosRef.current = datos;
 
@@ -252,8 +257,17 @@ export default function EmergenciaFormulario1Screen({ uuid = null, onTerminar })
   useEffect(() => {
     pedidoSugerencias.current += 1;
     const pedido = pedidoSugerencias.current;
-    if (dniTecleado.length < SUGERENCIAS_MIN_DIGITOS || dniTecleado.length >= 8 || !sinConsultar) {
+    // Tampoco mientras se consulta o se está pidiendo el sexo: sería un pedido de más.
+    if (dniTecleado.length < SUGERENCIAS_MIN_DIGITOS || dniTecleado.length >= 8 || !sinConsultar || consultando || pidioSexo) {
       setSugerencias([]);
+      setHayMasSugerencias(false);
+      return undefined;
+    }
+    // Si la última respuesta ya trajo todo (`hay_mas: false`), se filtra acá: cada pedido gasta de la cubeta.
+    const locales = sugerenciasDesdeLaPrevia(sugerenciasPrevias.current, dniTecleado);
+    if (locales) {
+      setSugerencias(locales.slice(0, 5));
+      setHayMasSugerencias(false);
       return undefined;
     }
     const timer = setTimeout(async () => {
@@ -261,14 +275,22 @@ export default function EmergenciaFormulario1Screen({ uuid = null, onTerminar })
       try {
         const respuesta = await sugerirPersonas(dniTecleado);
         if (!montado.current || pedidoSugerencias.current !== pedido) return;
-        setSugerencias(Array.isArray(respuesta?.resultados) ? respuesta.resultados.slice(0, 5) : []);
+        const resultados = Array.isArray(respuesta?.resultados) ? respuesta.resultados : [];
+        sugerenciasPrevias.current = { q: dniTecleado, resultados, hay_mas: respuesta?.hay_mas === false ? false : true };
+        setSugerencias(resultados.slice(0, 5));
+        setHayMasSugerencias(respuesta?.hay_mas === true || resultados.length > 5);
       } catch (e) {
-        if ([403, 404, 429].includes(Number(e?.status))) sugerenciasPausadasHasta.current = Date.now() + SUGERENCIAS_PAUSA_MS;
-        if (montado.current && pedidoSugerencias.current === pedido) setSugerencias([]);
+        if ([403, 404, 429].includes(Number(e?.status))) {
+          sugerenciasPausadasHasta.current = Date.now() + pausaDeSugerencias(e?.retryAfter, SUGERENCIAS_PAUSA_MS);
+        }
+        if (montado.current && pedidoSugerencias.current === pedido) {
+          setSugerencias([]);
+          setHayMasSugerencias(false);
+        }
       }
     }, SUGERENCIAS_ESPERA_MS);
     return () => clearTimeout(timer);
-  }, [dniTecleado, sinConsultar]);
+  }, [dniTecleado, sinConsultar, consultando, pidioSexo]);
 
   const elegirSugerencia = (sugerida) => {
     const dni = tecleadoDni(sugerida?.dni);
@@ -590,6 +612,7 @@ export default function EmergenciaFormulario1Screen({ uuid = null, onTerminar })
             </Text>
           </Pressable>
         ))}
+        {sugerencias.length > 0 && hayMasSugerencias ? <Text style={ayuda}>{TEXTO_HAY_MAS_SUGERENCIAS}</Text> : null}
         <CustomButton title="Buscar persona" variant="secondary" iconLeft="search-outline" loading={consultando}
           disabled={consultando} onPress={() => buscarPersona()} />
         {!pidioSexo && !datos.consulta ? <Text style={ayuda}>{TEXTO_AYUDA_BUSQUEDA}</Text> : null}

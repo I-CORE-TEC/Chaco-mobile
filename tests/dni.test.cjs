@@ -95,3 +95,16 @@ test('DNI como el back (#1299): tecleado solo dígitos hasta 8, con puntos al mo
   assert.equal(d.MENSAJE_DNI_INVALIDO, 'Ingresá un DNI válido de 7 u 8 dígitos, sin puntos.');
   assert.deepEqual([6, 7, 8, 9].map((n) => d.isValidDni('1'.repeat(n))), [false, true, true, false]);
 });
+
+test('sugerencias: la pausa respeta Retry-After y se filtra en el cliente cuando el back trajo todo', async () => {
+  const dni = await cargar();
+  assert.equal(dni.pausaDeSugerencias(null), 60000);
+  assert.equal(dni.pausaDeSugerencias(30000), 60000);
+  assert.equal(dni.pausaDeSugerencias(120000), 120000);
+  const previa = {q: '49103', hay_mas: false, resultados: [{dni: '49103788'}, {dni: '49103900'}]};
+  assert.deepEqual(JSON.parse(JSON.stringify(dni.sugerenciasDesdeLaPrevia(previa, '491037'))), [{dni: '49103788'}]);
+  assert.deepEqual(dni.sugerenciasDesdeLaPrevia({...previa, resultados: []}, '491037'), [], 'vacía y completa: no se vuelve a pedir');
+  assert.equal(dni.sugerenciasDesdeLaPrevia({...previa, hay_mas: true}, '491037'), null);
+  assert.equal(dni.sugerenciasDesdeLaPrevia(previa, '49104'), null, 'otro prefijo: hay que pedir');
+  assert.equal(dni.sugerenciasDesdeLaPrevia(null, '49103'), null);
+});
