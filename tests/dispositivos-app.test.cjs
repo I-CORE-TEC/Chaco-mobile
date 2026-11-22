@@ -47,8 +47,8 @@ async function montar() {
     })},
     '../hooks/useBotonAtras': {__esModule: true, default: (opciones) => { captura.atras = opciones; }},
     '../components/Banner': {__esModule: true, default: (props) => { captura.banner = props; return null; }},
-    '../components/CustomButton': {__esModule: true, default: () => null},
-    '../components/SettingsPanel': {__esModule: true, default: () => null},
+    '../components/BottomNav': {__esModule: true, default: (props) => { captura.barra = props; return null; }},
+    '../screens/CuentaScreen': {__esModule: true, default: (props) => { captura.cuenta = props; return null; }},
     '../screens/DispositivosListaScreen': {__esModule: true, default: pantalla('lista')},
     '../screens/DispositivoDetalleScreen': {__esModule: true, default: pantalla('detalle')},
     '../screens/DispositivoCompletarScreen': {__esModule: true, default: pantalla('completar')},
@@ -137,5 +137,59 @@ test('Atrás: si el envío arranca entre el toque y «Salir», no sale ni deja e
     assert.equal(ui.captura.toasts.length, 1);
     assert.match(ui.captura.toasts[0].message, /Se está enviando/);
     assert.equal(ui.captura.alertas.length, 1, 'no se duplica el diálogo');
+  } finally {await ui.close();}
+});
+
+test('Barra inferior: Inicio y Cuenta, con Inicio activo y las mismas entradas siempre', async () => {
+  const ui = await montar();
+  try {
+    assert.deepEqual([...ui.captura.barra.items.map(item => item.id)], ['inicio', 'cuenta']);
+    assert.deepEqual([...ui.captura.barra.items.map(item => item.label)], ['Inicio', 'Cuenta']);
+    assert.equal(ui.captura.barra.activeTab, 'inicio');
+  } finally {await ui.close();}
+});
+
+test('Barra inferior: con algo cargado en Completar pide confirmar igual que Atrás; «Salir» pasa a Cuenta', async () => {
+  const ui = await montar();
+  try {
+    await ui.act(() => ui.captura.completar.onEstado({cambios: true, enviando: false}));
+    await ui.act(() => ui.captura.barra.onTabPress('cuenta'));
+    assert.equal(ui.titulo(), 'Completar relevamiento');
+    assert.equal(ui.captura.barra.activeTab, 'inicio');
+    assert.equal(ui.captura.alertas.length, 1);
+    const [titulo, , botones] = ui.captura.alertas[0];
+    assert.equal(titulo, '¿Salir sin enviar?');
+    await ui.act(() => botones[1].onPress());
+    assert.equal(ui.titulo(), 'Cuenta');
+    assert.equal(ui.captura.barra.activeTab, 'cuenta');
+    assert.ok(ui.captura.cuenta);
+  } finally {await ui.close();}
+});
+
+test('Barra inferior: durante el envío no se cambia de pestaña y avisa', async () => {
+  const ui = await montar();
+  try {
+    await ui.act(() => ui.captura.completar.onEstado({cambios: true, enviando: true}));
+    await ui.act(() => ui.captura.barra.onTabPress('cuenta'));
+    assert.equal(ui.titulo(), 'Completar relevamiento');
+    assert.equal(ui.captura.barra.activeTab, 'inicio');
+    assert.match(ui.captura.toasts[0].message, /Se está enviando/);
+    assert.equal(ui.captura.alertas.length, 0);
+  } finally {await ui.close();}
+});
+
+test('Barra inferior: sin nada cargado cambia directo; Inicio vuelve a la lista y Atrás sale de Cuenta', async () => {
+  const ui = await montar();
+  try {
+    await ui.act(() => ui.captura.barra.onTabPress('cuenta'));
+    assert.equal(ui.captura.alertas.length, 0);
+    assert.equal(ui.titulo(), 'Cuenta');
+    assert.equal(ui.captura.atras.activo, true);
+    await ui.act(() => ui.captura.atras.alAtras());
+    assert.equal(ui.titulo(), 'Hola, Ana');
+    assert.equal(ui.captura.atras.activo, false);
+    await ui.act(() => ui.captura.barra.onTabPress('cuenta'));
+    await ui.act(() => ui.captura.barra.onTabPress('inicio'));
+    assert.equal(ui.titulo(), 'Hola, Ana');
   } finally {await ui.close();}
 });

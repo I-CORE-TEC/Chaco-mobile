@@ -1,4 +1,4 @@
-// usePermisos y la sección Permisos de SettingsPanel: desmontaje, «Pidiendo…» y «Abrir ajustes».
+// usePermisos y la sección Permisos de CuentaScreen: desmontaje, «Pidiendo…» y «Abrir ajustes».
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -110,7 +110,7 @@ test('D2: un diálogo ignorado vence, vuelve a consultar el estado y libera el b
   await ui.desmontar();
 });
 
-// ---------------------------------------------------------------- SettingsPanel
+// ---------------------------------------------------------------- CuentaScreen
 function loadTokens() {
   const exported = {};
   const code = transformSync(fs.readFileSync(path.join(root, 'src/theme/tokens.js'), 'utf8'), {
@@ -137,14 +137,14 @@ async function montarPanel({os = 'android', leer, pedir}) {
     'expo-image-picker': {getCameraPermissionsAsync: leer, requestCameraPermissionsAsync: pedir},
   });
   const usePermisos = cargar('src/hooks/usePermisos.js', {react: React, '../services/permisos': permisosNativo}).default;
-  const Panel = cargar('src/components/SettingsPanel.js', {
+  const Panel = cargar('src/screens/CuentaScreen.js', {
     react: React, 'react-native': nativos,
     '@expo/vector-icons': {Ionicons: 'Ionicons'}, 'expo-linear-gradient': {LinearGradient: 'LinearGradient'},
     '../context/ThemeContext': {useTheme: () => ({theme, isDark: false, toggleTheme() {}, typography: {medium: 'M', regular: 'R', bold: 'B', semibold: 'S'}})},
     '../context/AuthContext': {useAuth: () => ({user: {username: 'ana'}})},
     '../services/modulos': {NOMBRE_MODULO: {becas: 'Becas', dispositivos: 'Dispositivos'}},
-    './CustomButton': {__esModule: true, default: 'CustomButton'},
-    './AvisosContador': {__esModule: true, default: 'AvisosContador'},
+    '../components/CustomButton': {__esModule: true, default: 'CustomButton'},
+    '../components/AvisosContador': {__esModule: true, default: 'AvisosContador'},
     '../hooks/usePermisos': {__esModule: true, default: usePermisos},
     '../services/permisos': permisosNativo,
     '../theme': loadTokens(),

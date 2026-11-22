@@ -1,12 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Platform, View, StyleSheet } from 'react-native';
+import { Platform, View } from 'react-native';
 import NetInfo from '@react-native-community/netinfo';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { useToast } from '../context/ToastContext';
 import Banner from '../components/Banner';
-import CustomButton from '../components/CustomButton';
-import SettingsPanel from '../components/SettingsPanel';
+import BottomNav from '../components/BottomNav';
+import CuentaScreen from '../screens/CuentaScreen';
 import useBotonAtras from '../hooks/useBotonAtras';
 import EmergenciaInicioScreen from '../screens/EmergenciaInicioScreen';
 import EmergenciaMisEnviosScreen from '../screens/EmergenciaMisEnviosScreen';
@@ -25,6 +25,13 @@ import {
 } from '../services/emergenciaCola';
 import { avisoDeSalida } from '../utils/emergencia';
 import { depurarBorradoresFicha } from '../services/emergenciaLimpieza';
+
+// Entradas de la barra inferior de Emergencia. Los accesos de cada perfil (ingreso, llegadas, kits) siguen
+// dentro de Inicio, filtrados por el perfil como antes.
+const PESTANAS = [
+  { id: 'inicio', label: 'Inicio', icon: 'home-outline', activeIcon: 'home' },
+  { id: 'cuenta', label: 'Cuenta', icon: 'person-circle-outline', activeIcon: 'person-circle' },
+];
 
 const SYNC_INTERVAL_MS = 8000;
 const RECONNECT_DELAY_MS = 1800;
@@ -91,7 +98,7 @@ export default function EmergenciaApp({ onCambiarModulo }) {
   const { showAlert, showToast } = useToast();
   const { user, logout } = useAuth();
   const displayName = user?.nombre || user?.username || 'Usuario';
-  const [settingsVisible, setSettingsVisible] = useState(false);
+  const [pestana, setPestana] = useState('inicio');
   const [pantalla, setPantalla] = useState({ vista: 'inicio', uuid: null });
   const [recarga, setRecarga] = useState(0);
   const [cargandoPerfil, setCargandoPerfil] = useState(false);
@@ -198,7 +205,6 @@ export default function EmergenciaApp({ onCambiarModulo }) {
   };
 
   const salir = async () => {
-    setSettingsVisible(false);
     let aviso = null;
     try {
       aviso = avisoDeSalida(await getResumenPendientes());
@@ -384,7 +390,7 @@ export default function EmergenciaApp({ onCambiarModulo }) {
   };
 
   const { vista, uuid } = pantalla;
-  const titulo = vista === 'inicio' ? `Hola, ${displayName}`
+  const titulo = pestana === 'cuenta' ? 'Cuenta' : vista === 'inicio' ? `Hola, ${displayName}`
     : (['kits_entregas', 'llegadas_buscar'].includes(vista) && pantalla.dispositivo?.nombre)
       || (vista === 'llegadas_ficha' && pantalla.persona?.n != null && `Persona ${pantalla.persona.n}`)
       || (vista === 'llegadas_cierre' && TITULOS_CIERRE[pantalla.cierre]) || TITULOS[vista];
@@ -402,9 +408,9 @@ export default function EmergenciaApp({ onCambiarModulo }) {
     else setPantalla(INICIO);
     refrescarEstado();
   };
-  // Vale para el botón del encabezado, el Atrás de Android y el del navegador: frena mientras se envía y
-  // pide confirmar con algo cargado sin mandar.
-  const volver = () => {
+  // Vale para el botón del encabezado, el Atrás de Android y el del navegador, y para la barra inferior: frena
+  // mientras se envía y pide confirmar con algo cargado sin mandar. `accion` es adónde se va.
+  const conGuarda = (accion) => {
     if (enviando) {
       showToast({ type: 'info', message: TEXTO_ENVIANDO });
       return;
@@ -420,15 +426,28 @@ export default function EmergenciaApp({ onCambiarModulo }) {
           onPress: () => {
             if (vistaVigente.current !== vista) return;
             if (enviandoVigente.current) { showToast({ type: 'info', message: TEXTO_ENVIANDO }); return; }
-            irAtras();
+            accion();
           },
         },
       ]);
       return;
     }
-    irAtras();
+    accion();
   };
-  useBotonAtras({ activo: vista !== 'inicio', alAtras: volver });
+  const volver = () => {
+    if (pestana === 'cuenta') { setPestana('inicio'); return; }
+    conGuarda(irAtras);
+  };
+  // Tocar una pestaña: a Inicio se llega siempre al inicio del módulo (con la guarda de arriba).
+  const irAPestana = (destino) => {
+    if (destino === pestana && (destino === 'cuenta' || vista === 'inicio')) return;
+    conGuarda(() => {
+      setPantalla(INICIO);
+      setPestana(destino);
+      refrescarEstado();
+    });
+  };
+  useBotonAtras({ activo: vista !== 'inicio' || pestana !== 'inicio', alAtras: volver });
   let syncStatus = 'synced';
   if (sincronizando || cargandoPerfil) syncStatus = 'syncing';
   else if (pendientes > 0) syncStatus = 'pending';
@@ -436,62 +455,63 @@ export default function EmergenciaApp({ onCambiarModulo }) {
   return (
     <>
       <Banner title={titulo} syncStatus={syncStatus} syncPendingCount={pendientes}
-        onSyncPress={sincronizarAhora} showBackButton={vista !== 'inicio' && !enviando} onBackPress={volver} />
+        onSyncPress={sincronizarAhora} showBackButton={(vista !== 'inicio' || pestana !== 'inicio') && !enviando} onBackPress={volver} />
       <View style={{ flex: 1, backgroundColor: theme.colors.background }}>
-        {vista === 'inicio' ? (
+        {pestana === 'cuenta' ? <CuentaScreen onCambiarModulo={onCambiarModulo || undefined} onLogout={salir} /> : null}
+        {pestana === 'inicio' && vista === 'inicio' ? (
           <EmergenciaInicioScreen onAbrir={abrir} recarga={recarga} onCargando={setCargandoPerfil} />
         ) : null}
-        {vista === 'envios' ? (
+        {pestana === 'inicio' && vista === 'envios' ? (
           <EmergenciaMisEnviosScreen syncTick={syncTick} enviadosTick={enviadosTick} onCambio={refrescarEstado}
             onNuevo={relevarNueva}
             onCorregir={(abierto) => setPantalla({ vista: 'formulario', uuid: abierto })} />
         ) : null}
-        {vista === 'formulario' ? (
+        {pestana === 'inicio' && vista === 'formulario' ? (
           <EmergenciaFormulario1Screen key={uuid || 'nuevo'} uuid={uuid}
             onTerminar={() => { setPantalla({ vista: 'envios', uuid: null }); refrescarEstado(); }} />
         ) : null}
-        {vista === 'kits_dispositivos' ? (
+        {pestana === 'inicio' && vista === 'kits_dispositivos' ? (
           <EmergenciaMisDispositivosScreen recarga={recarga} onElegir={elegirDispositivo} onSinModulo={sinModulo}
             entrarDirecto={!pantalla.sinEntrarDirecto} />
         ) : null}
-        {vista === 'kits_entregas' ? (
+        {pestana === 'inicio' && vista === 'kits_entregas' ? (
           <EmergenciaEntregasScreen key={String(pantalla.dispositivo?.id)} dispositivo={pantalla.dispositivo} recarga={recarga}
             onAbrir={(entrega) => setPantalla((actual) => ({ ...actual, vista: 'kits_recibir', entrega }))}
             onNoEncontrado={dispositivoNoEncontrado} onSinModulo={sinModulo} />
         ) : null}
-        {vista === 'kits_recibir' ? (
+        {pestana === 'inicio' && vista === 'kits_recibir' ? (
           <EmergenciaRecibirEntregaScreen key={String(pantalla.entrega?.id)} entrega={pantalla.entrega}
             dispositivoId={pantalla.dispositivo?.id ?? null} onTerminar={terminarRecepcion} onSinModulo={sinModulo}
             onEnviando={setEnviando} onCambios={marcarCambios('kits_recibir')} />
         ) : null}
-        {vista === 'llegadas_dispositivos' ? (
+        {pestana === 'inicio' && vista === 'llegadas_dispositivos' ? (
           <EmergenciaMisDispositivosScreen key="llegadas" modo="llegadas" recarga={recarga} onElegir={elegirDispositivoLlegadas}
             onSinModulo={sinModulo} entrarDirecto={!pantalla.sinEntrarDirecto} />
         ) : null}
-        {vista === 'llegadas_buscar' ? (
+        {pestana === 'inicio' && vista === 'llegadas_buscar' ? (
           <EmergenciaLlegadaBuscarScreen key={`buscar-${pantalla.dispositivo?.id}-${pantalla.n}`} dispositivo={pantalla.dispositivo}
             dniInicial={pantalla.dni} autoBuscar={!!pantalla.autoBuscar} esperaHasta={esperaBuscarHasta} onEspera={setEsperaBuscarHasta}
             onDerivacion={verDerivacion} onIntegrantes={verIntegrantes}
             onNoEncontrado={llegadaNoEncontrada} onSinModulo={sinModulo} onSinDerivacion={verPuerta} />
         ) : null}
-        {vista === 'llegadas_derivacion' ? (
+        {pestana === 'inicio' && vista === 'llegadas_derivacion' ? (
           <EmergenciaDerivacionScreen key={`derivacion-${pantalla.busqueda?.derivacion?.id}`} busqueda={pantalla.busqueda}
             onAceptada={(caso) => { setEnviando(false); verIntegrantes(caso); }}
             onRechazada={() => { setEnviando(false); verBuscar(); }}
             onConflicto={recargarPorEstado} onNoEncontrado={llegadaNoEncontrada} onSinModulo={sinModulo} onEnviando={setEnviando} />
         ) : null}
-        {vista === 'llegadas_integrantes' ? (
+        {pestana === 'inicio' && vista === 'llegadas_integrantes' ? (
           <EmergenciaIntegrantesScreen key={`integrantes-${pantalla.caso?.id}-${pantalla.n}`} caso={pantalla.caso} recarga={recarga}
             onConflicto={recargarPorEstado} onNoEncontrado={llegadaNoEncontrada} onSinModulo={sinModulo}
             onCerrar={verCierre} onEnviando={setEnviando} onAbrirPersona={verPersona} />
         ) : null}
-        {vista === 'llegadas_ficha' ? (
+        {pestana === 'inicio' && vista === 'llegadas_ficha' ? (
           <EmergenciaFichaScreen key={`ficha-${pantalla.caso?.id}-${pantalla.persona?.n}-${pantalla.n}`} caso={pantalla.caso}
             n={pantalla.persona?.n} dispositivo={pantalla.dispositivo} integrantes={pantalla.persona?.integrantes || []} recarga={recarga}
             onTerminar={terminarPersona} onConflicto={recargarPorEstado} onNoEncontrado={personaNoEncontrada} onSinModulo={sinModulo}
             onEnviando={setEnviando} onCambios={marcarCambios('llegadas_ficha')} />
         ) : null}
-        {vista === 'llegadas_cierre' ? (
+        {pestana === 'inicio' && vista === 'llegadas_cierre' ? (
           <EmergenciaCierreScreen key={`cierre-${pantalla.caso?.id}-${pantalla.cierre}-${pantalla.n}`} caso={pantalla.caso} cierre={pantalla.cierre}
             confirmadas={pantalla.cierreDatos?.confirmadas ?? 0} total={pantalla.cierreDatos?.total ?? 0}
             integrantes={pantalla.cierreDatos?.integrantes || []} derivacion={pantalla.cierreDatos?.derivacion ?? null}
@@ -499,7 +519,7 @@ export default function EmergenciaApp({ onCambiarModulo }) {
             onConflicto={recargarPorEstado} onNoEncontrado={llegadaNoEncontrada} onSinModulo={sinModulo} onEnviando={setEnviando}
             onCambios={marcarCambios('llegadas_cierre')} />
         ) : null}
-        {vista === 'llegadas_puerta' ? (
+        {pestana === 'inicio' && vista === 'llegadas_puerta' ? (
           <EmergenciaPuertaScreen key={`puerta-${pantalla.dispositivo?.id}-${pantalla.dni}-${pantalla.n}`} dispositivo={pantalla.dispositivo}
             dni={pantalla.dni} plazasLibres={pantalla.puerta?.plazasLibres ?? 0} accion={pantalla.puerta?.accion}
             mensaje={pantalla.puerta?.mensaje || ''} puedeIngresarIgual={pantalla.puerta?.puedeIngresarIgual ?? null}
@@ -508,24 +528,7 @@ export default function EmergenciaApp({ onCambiarModulo }) {
             onCambios={marcarCambios('llegadas_puerta')} />
         ) : null}
       </View>
-      {vista === 'inicio' ? (
-        <View style={styles.barra}>
-          <CustomButton title="Menú" variant="secondary" iconLeft="menu" onPress={() => setSettingsVisible(true)} />
-        </View>
-      ) : null}
-      <SettingsPanel
-        visible={!!settingsVisible}
-        onClose={() => setSettingsVisible(false)}
-        onCambiarModulo={onCambiarModulo && (() => {
-          setSettingsVisible(false);
-          onCambiarModulo();
-        })}
-        onLogout={salir}
-      />
+      <BottomNav items={PESTANAS} activeTab={pestana} onTabPress={irAPestana} />
     </>
   );
 }
-
-const styles = StyleSheet.create({
-  barra: { padding: 12, alignItems: 'center' },
-});
