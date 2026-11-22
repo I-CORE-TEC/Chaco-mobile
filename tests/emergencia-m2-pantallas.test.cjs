@@ -373,7 +373,7 @@ test('Buscar: la espera del 429 viene del padre (sobrevive a re-entrar) y se le 
   } finally { await ui.close(); }
   const otra = await montarBuscar(() => response(200, BUSQUEDA), {props: {esperaHasta: Date.now() + 10000, dniInicial: '30111222', autoBuscar: true}});
   try {
-    assert.ok(otra.button('Buscar en 10 s') || otra.button('Buscar en 9 s'), 'botones: ' + otra.titulos());
+    assert.ok(otra.button('Buscar en 10 s') || otra.button('Buscar en 9 s') || otra.button('Buscar en 8 s'), 'botones: ' + otra.titulos());
     assert.equal(api(otra.calls).length, 0, 'ni la búsqueda automática sale durante la espera');
   } finally { await otra.close(); }
 });

@@ -855,3 +855,15 @@ test('Cambio 553: la ficha avisa al padre lo cargado sin mandar', async () => {
     assert.equal(cambios.at(-1), true);
   } finally { await ui.close(); }
 });
+
+test('Ficha: un valor guardado que no está entre las opciones se muestra como «Cargado: …» y uno de la lista no', async () => {
+  const conNivel = nivel => ({...CONFIRMADA, ficha: {...FICHA_GUARDADA, educacion: {nivel_educativo: nivel}}});
+  const fuera = await montarFicha(rutasDe({persona: conNivel('POSGRADO_VIEJO')}));
+  try {
+    assert.ok(fuera.labels().includes('Cargado: POSGRADO_VIEJO'), 'el valor fuera de la lista no queda vacío');
+  } finally { await fuera.close(); }
+  const dentro = await montarFicha(rutasDe({persona: conNivel('PRIMARIO')}));
+  try {
+    assert.ok(!dentro.labels().some(t => t.startsWith('Cargado:')), 'uno de la lista se marca en su opción y no repite el texto');
+  } finally { await dentro.close(); }
+});

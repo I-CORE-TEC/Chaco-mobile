@@ -64,6 +64,8 @@ const SALIR_CON_CAMBIOS = {
   llegadas_ficha: 'Lo que cargaste de esta persona queda guardado como borrador en este teléfono; lo retomás cuando vuelvas a abrirla.',
   kits_recibir: 'Las cantidades y la observación quedan guardadas en este teléfono; la foto del remito hay que volver a sacarla.',
 };
+// Con un envío sin resultado (pendiente) lo cargado NO se pierde: queda en el teléfono y se reintenta al reabrir a la familia.
+const TEXTO_SALIR_PENDIENTE = 'Hay un envío de esta familia sin resultado. Queda guardado en este teléfono: cuando vuelvas a abrir a la familia podés reintentarlo.';
 export const TEXTO_ENVIANDO = 'Se está enviando. Esperá un momento.';
 // El mismo texto que TEXTO_PERSONA_NO_ENCONTRADA de emergenciaLlegadas (el router no importa servicios).
 const TEXTO_PERSONA_NO_ENCONTRADA = 'Esa persona ya no está en la familia, o el caso ya no es de tu dispositivo. Se vuelven a cargar los integrantes.';
@@ -112,7 +114,7 @@ export default function EmergenciaApp({ onCambiarModulo }) {
   const [enviando, setEnviando] = useState(false);
   // Lo cargado sin mandar de la pantalla abierta ({ vista, valor }): lo informa cada pantalla con `onCambios`.
   const cambiosPantalla = useRef({ vista: null, valor: false });
-  const marcarCambios = (deVista) => (valor) => { cambiosPantalla.current = { vista: deVista, valor: !!valor }; };
+  const marcarCambios = (deVista) => (valor, pendiente) => { cambiosPantalla.current = { vista: deVista, valor: !!valor, pendiente: pendiente === true }; };
   // Al cambiar de pantalla (aunque sea la misma vista con otra persona) lo cargado de la anterior no vale: se lee
   // al renderizar, antes de que la pantalla nueva pueda avisar algo.
   const pantallaDeCambios = useRef(null);
@@ -417,7 +419,7 @@ export default function EmergenciaApp({ onCambiarModulo }) {
     }
     const cargado = cambiosPantalla.current;
     if (SALIR_CON_CAMBIOS[vista] && cargado.vista === vista && cargado.valor) {
-      showAlert('¿Salir sin enviar?', SALIR_CON_CAMBIOS[vista], [
+      showAlert('¿Salir sin enviar?', cargado.pendiente ? TEXTO_SALIR_PENDIENTE : SALIR_CON_CAMBIOS[vista], [
         { text: 'Seguir cargando', style: 'cancel' },
         {
           text: 'Salir',

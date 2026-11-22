@@ -64,7 +64,7 @@ const ACCIONES = {
 // del DNI anterior sin reintentar). Si lo cargado ya se borró del teléfono (logout, 48 h) y queda solo el
 // uuid, se ofrece «Reintentar» con el uuid solo; si el servidor dice que no había llegado, se carga de nuevo.
 // - `onNoEncontrado()`: 404. `onSinModulo(mensaje)`: 403. `onEnviando(bool)`: hay un envío en curso.
-// - `onCambios(bool)`: hay algo cargado sin mandar (el padre pide confirmar antes de salir con Atrás).
+// - `onCambios(bool, pendiente)`: hay algo cargado sin mandar (el padre pide confirmar antes de salir con Atrás); `pendiente`: hay un envío sin resultado guardado en el teléfono (el texto de salida lo dice).
 // «Avisar a la mesa» puede contestar 400 sin campo (Cambio 553: la familia ya tiene una derivación en curso a
 // otro edificio de este dispositivo): se muestra el mensaje del back y el botón queda apagado; no se reintenta.
 export default function EmergenciaPuertaScreen({
@@ -145,8 +145,8 @@ export default function EmergenciaPuertaScreen({
   // Lo que la guardia cargó (no lo que completó la búsqueda sola) o un envío sin resultado.
   const hayCambios = tocado || !!pendiente;
   useEffect(() => {
-    try { onCambios?.(hayCambios); } catch { /* Solo informa. */ }
-  }, [hayCambios]);
+    try { onCambios?.(hayCambios, !!pendiente); } catch { /* Solo informa. */ }
+  }, [hayCambios, !!pendiente]);
 
   const esperando = esperaHasta > ahora;
   useEffect(() => {

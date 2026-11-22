@@ -495,7 +495,15 @@ export default function EmergenciaFichaScreen({
     borderColor: errorDe(campo).length ? theme.colors.danger : theme.colors.border,
   }];
 
+  // Un valor guardado que ya no está entre las opciones (lista cambiada, dato de otra versión) no se deja vacío: se muestra.
+  const valorFueraDeLista = (campo, opciones) => {
+    const guardado = plano[campo];
+    if (guardado === null || guardado === undefined || guardado === '') return null;
+    return opciones.some((opcion) => opcion.valor === guardado) ? null : String(guardado);
+  };
   const opcionesDe = ({ nombre, opciones, campo }) => (
+    <>
+    {valorFueraDeLista(campo, opciones) !== null ? <Text style={ayuda}>{`Cargado: ${valorFueraDeLista(campo, opciones)}`}</Text> : null}
     <View style={styles.opciones} accessibilityRole="radiogroup" accessibilityLabel={nombre}>
       {opciones.map((opcion) => {
         const elegida = plano[campo] === opcion.valor;
@@ -510,6 +518,7 @@ export default function EmergenciaFichaScreen({
         );
       })}
     </View>
+    </>
   );
   // Sí / No: `false` es una respuesta; tocar la elegida la deja sin responder.
   const siNo = (campo, titulo, obligatorio = false) => (

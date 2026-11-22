@@ -1222,3 +1222,21 @@ test('EmergenciaApp (Atrás): el hook se activa fuera del inicio; frena mientras
 });
 
 const FILAS_FAMILIA = [{n: 1, es_adulto: true}, {n: 2, es_adulto: false}];
+
+test('EmergenciaApp (Atrás): con un envío pendiente en la puerta, el texto de salida dice que queda guardado y no que se pierde', async () => {
+  const ui = await montarApp();
+  const busqueda = {resultado: 'SIN_DERIVACION', dni: '30111222', plazas_libres: 4, mensaje: 'No hay derivación.'};
+  try {
+    await ui.alBuscar();
+    await ui.hacer(() => ui.pantallas.buscar.onSinDerivacion('avisar', busqueda));
+    // Solo tipeado, sin envío pendiente: sí se pierde.
+    await ui.hacer(() => ui.pantallas.puerta.onCambios(true, false));
+    await ui.hacer(() => ui.pantallas.atras.alAtras());
+    assert.equal(ui.alerts.at(-1)[1], 'Lo que cargaste no se mandó. Si salís, se pierde.');
+    // Con el envío sin resultado: queda en el teléfono.
+    await ui.hacer(() => ui.pantallas.puerta.onCambios(true, true));
+    await ui.hacer(() => ui.pantallas.atras.alAtras());
+    const texto = ui.alerts.at(-1)[1];
+    assert.ok(/sin resultado/.test(texto) && /guardado en este teléfono/.test(texto) && !/se pierde/.test(texto), texto);
+  } finally { await ui.close(); }
+});
