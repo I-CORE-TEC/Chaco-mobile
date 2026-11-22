@@ -713,3 +713,20 @@ test('B5b: tras una falla transitoria no se reintenta dentro de la misma llamada
   assert.equal(envio.estado, 'pendiente');
   assert.equal(escritos(calls).length, 1, 'una sola pasada: el reintento espera su backoff');
 });
+
+test('los avisos del POST resultado/ quedan en el envio, tambien si la sincronizacion es en segundo plano', async () => {
+  const {r, d, enviar} = await preparar({archivos: {}, fotos: []});
+  await enviar();
+  router(r, async () => response(200, detalle({estado: 'REALIZADA', avisos: ['Falta el archivo «Plano».', '  ', 7]})));
+  assert.equal((await d.syncPendientes()).synced, 1);
+  assert.deepEqual([...payloadOf(r).avisos], ['Falta el archivo «Plano».']);
+  assert.deepEqual([...(await d.getEstadoEnvio(5)).avisos], ['Falta el archivo «Plano».']);
+});
+
+test('sin la clave avisos (back viejo) el envio trae una lista vacia', async () => {
+  const {r, d, enviar} = await preparar({archivos: {}, fotos: []});
+  await enviar();
+  router(r, async () => OK_RESULTADO());
+  await d.syncPendientes();
+  assert.deepEqual([...(await d.getEstadoEnvio(5)).avisos], []);
+});

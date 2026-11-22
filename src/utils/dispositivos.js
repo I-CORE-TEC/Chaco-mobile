@@ -47,12 +47,29 @@ export const ETIQUETA_ENVIO = {
   enviado: 'Enviado',
 };
 
+// El back contesta igual (404, mismo cuerpo) a lo que no existe y a lo que no es del agente: el
+// texto tiene que valer para los dos.
+const TEXTO_ALCANCE = 'no está a tu cargo. Si debería estarlo, pedile a la coordinación que revise tu alcance.';
+export const TEXTO_FUERA_DE_ALCANCE = `No tenés acceso a este edificio o dispositivo, o ya no existe. Pedile a la coordinación que revise tu alcance.`;
+
+// 404, o 403 que no es de módulo apagado (SIN_MODULO tiene su propio aviso) ni de clave provisoria.
+export const esFueraDeAlcance = (error) => {
+  const status = Number(error?.status || 0);
+  if (status === 404) return true;
+  const payload = error?.payload && typeof error.payload === 'object' ? error.payload : {};
+  return status === 403 && payload.code !== 'SIN_MODULO' && !payload.codigo;
+};
+
+// Mensaje de una carga que falló: el de alcance si corresponde; si no, el del error.
+export const mensajeDeCarga = (error, base) => (esFueraDeAlcance(error)
+  ? TEXTO_FUERA_DE_ALCANCE : (error?.message || base));
+
 const TEXTO_POR_CODE = {
   REASIGNADA: 'Este relevamiento fue reasignado a otra persona. Lo que cargaste quedó guardado en el teléfono, sin enviar.',
   CANCELADA: 'Este relevamiento fue cancelado. Lo que cargaste quedó guardado en el teléfono, sin enviar.',
   YA_REALIZADA: 'Este relevamiento ya figura como realizado; no se envió de nuevo.',
   ESTADO_NO_ADMITE: 'El relevamiento ya no admite cargas en su estado actual.',
-  NO_ENCONTRADA: 'El relevamiento ya no está disponible para vos.',
+  NO_ENCONTRADA: `El relevamiento no existe o ${TEXTO_ALCANCE}`,
   REINTENTOS_AGOTADOS: 'No se pudo enviar después de varios intentos.',
   REABIERTA: 'Volvieron a asignarte este relevamiento. Lo que cargaste sigue guardado: completalo y enviá.',
   ARCHIVO_RECHAZADO: 'El servidor rechazó un archivo adjunto. Probá reintentar el envío.',

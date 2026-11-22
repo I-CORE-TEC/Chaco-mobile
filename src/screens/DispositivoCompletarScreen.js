@@ -16,15 +16,17 @@ import { getInspeccion, enviarResultado, getCargaRechazada } from '../services/d
 import {
   leerBorrador, guardarBorrador, borrarBorrador, copiarParaBorrador, borrarArchivoDelBorrador,
 } from '../services/dispositivosBorrador';
-import { prepararAsset, CRITICIDADES, direccionDe, combinarCargaPrevia, describirEnvio, etiquetasDeCampos, textoEnEspera } from '../utils/dispositivos';
+import { prepararAsset, CRITICIDADES, direccionDe, combinarCargaPrevia, describirEnvio, etiquetasDeCampos, textoEnEspera, mensajeDeCarga } from '../utils/dispositivos';
 import { statusTones } from '../theme/statusBadges';
 import { keyboardDismissModeFor } from '../utils/teclado';
 import { fontSizes, radii } from '../theme';
 
 const AUTOGUARDADO_MS = 500;
+const NUEVA_LINEA = String.fromCharCode(10);
 const vacio = (valor) => valor == null || valor === '' || (Array.isArray(valor) && !valor.length);
 
-export default function DispositivoCompletarScreen({ inspeccionId, onTerminar }) {
+// `onEstado({ cambios, enviando })`: lo avisa al navegador para confirmar o frenar el Atrás.
+export default function DispositivoCompletarScreen({ inspeccionId, onTerminar, onEstado }) {
   const { theme, typography } = useTheme();
   const { showToast, showAlert } = useToast();
   const { user } = useAuth();
@@ -32,6 +34,7 @@ export default function DispositivoCompletarScreen({ inspeccionId, onTerminar })
   const [detalle, setDetalle] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [intento, setIntento] = useState(0);
   const [valores, setValores] = useState({});
   const [criticidad, setCriticidad] = useState('');
   const [observaciones, setObservaciones] = useState('');
@@ -56,6 +59,7 @@ export default function DispositivoCompletarScreen({ inspeccionId, onTerminar })
         const result = await getInspeccion(inspeccionId, { refreshFromRemote: false });
         if (!activo) return;
         if (!result) { setError('No se pudo cargar el relevamiento.'); return; }
+        setError('');
         setDetalle(result);
         const borrador = await leerBorrador(ownerId, inspeccionId);
         if (!activo) return;
@@ -77,14 +81,14 @@ export default function DispositivoCompletarScreen({ inspeccionId, onTerminar })
           showToast({ type: 'info', message: mensaje });
         }
       } catch (e) {
-        if (activo) setError(e?.message || 'No se pudo cargar el relevamiento.');
+        if (activo) setError(mensajeDeCarga(e, 'No se pudo cargar el relevamiento.'));
       } finally {
         cargado.current = true;
         if (activo) setLoading(false);
       }
     })();
     return () => { activo = false; };
-  }, [inspeccionId]);
+  }, [inspeccionId, intento]);
 
   // En web la URL blob: no sobrevive a recargar: esos archivos no van al borrador. Una data: URI
   // (la firma) sí sobrevive y queda.
@@ -124,6 +128,11 @@ export default function DispositivoCompletarScreen({ inspeccionId, onTerminar })
   useEffect(() => () => {
     if (cargado.current && !enviado.current && ultimo.current) guardarBorrador(ownerId, inspeccionId, ultimo.current);
   }, []);
+
+  // Mismo criterio que el autoguardado: hay algo cargado que todavía no se envió.
+  const hayCambios = !!(criticidad || observaciones || fotos.length || Object.keys(valores).length);
+  useEffect(() => { if (onEstado) onEstado({ cambios: hayCambios, enviando }); }, [hayCambios, enviando]);
+  useEffect(() => () => { if (onEstado) onEstado({ cambios: false, enviando: false }); }, []);
 
   const formulario = detalle?.formulario || null;
   const diseno = useMemo(
@@ -268,8 +277,11 @@ export default function DispositivoCompletarScreen({ inspeccionId, onTerminar })
       enviado.current = true;
       await borrarBorrador(ownerId, inspeccionId, ultimo.current || instantanea());
       const estado = resultado?.envio?.estado;
-      if (estado === 'enviado') showToast({ type: 'success', message: 'Relevamiento enviado.' });
-      else if (estado === 'error') {
+      const avisos = estado === 'enviado' ? resultado.envio.avisos || [] : [];
+      if (estado === 'enviado') {
+        showToast({ type: 'success', message: 'Relevamiento enviado.' });
+        if (avisos.length) showAlert('Enviado, con avisos', avisos.map((aviso) => `• ${aviso}`).join(NUEVA_LINEA));
+      } else if (estado === 'error') {
         const motivo = describirEnvio(resultado.envio, etiquetasDeCampos(formulario));
         showToast({ type: 'warning', message: motivo?.titulo || 'El envío tuvo un problema; mirá el detalle del relevamiento.' });
       } else showToast({ type: 'info', message: textoEnEspera(resultado?.envio) });
@@ -281,11 +293,19 @@ export default function DispositivoCompletarScreen({ inspeccionId, onTerminar })
     }
   };
 
-  if (loading) return <View style={styles.centro}><ActivityIndicator size="large" color={theme.colors.primary} /></View>;
+  if (loading) {
+    return (
+      <View style={styles.centro}>
+        <ActivityIndicator size="large" color={theme.colors.primary} accessibilityLabel="Cargando el relevamiento" />
+      </View>
+    );
+  }
   if (!detalle) {
     return (
       <View style={styles.centro}>
-        <Text style={[styles.texto, { color: theme.colors.text, fontFamily: typography.medium }]}>{error}</Text>
+        <Text accessibilityRole="alert" style={[styles.texto, { color: theme.colors.text, fontFamily: typography.medium }]}>{error}</Text>
+        <CustomButton title="Reintentar" variant="secondary" iconLeft="refresh"
+          onPress={() => { setLoading(true); setIntento((valor) => valor + 1); }} />
       </View>
     );
   }
@@ -309,7 +329,7 @@ export default function DispositivoCompletarScreen({ inspeccionId, onTerminar })
       keyboardShouldPersistTaps="handled"
       keyboardDismissMode={keyboardDismissModeFor(Platform.OS === 'ios' ? 'interactive' : 'on-drag')}>
       <View style={tarjeta}>
-        <Text style={titulo}>{edificio.nombre || `Relevamiento ${detalle.id}`}</Text>
+        <Text accessibilityRole="header" style={titulo}>{edificio.nombre || `Relevamiento ${detalle.id}`}</Text>
         <Text style={[styles.texto, { color: theme.colors.textMuted, fontFamily: typography.medium }]}>{direccionDe(edificio)}</Text>
       </View>
 
@@ -319,7 +339,7 @@ export default function DispositivoCompletarScreen({ inspeccionId, onTerminar })
       )) : null}
 
       <View style={tarjeta}>
-        <Text style={titulo}>Criticidad *</Text>
+        <Text accessibilityRole="header" style={titulo}>Criticidad *</Text>
         <View style={styles.segmentado}>
           {CRITICIDADES.map(({ valor, titulo: nombre }) => {
             const elegido = criticidad === valor;
@@ -333,7 +353,7 @@ export default function DispositivoCompletarScreen({ inspeccionId, onTerminar })
             );
           })}
         </View>
-        <Text style={[titulo, { marginTop: 12 }]}>Observaciones</Text>
+        <Text accessibilityRole="header" style={[titulo, { marginTop: 12 }]}>Observaciones</Text>
         <TextInput value={observaciones} onChangeText={setObservaciones} multiline
           accessibilityLabel="Observaciones" placeholder="Algo más que quieras dejar asentado"
           placeholderTextColor={theme.colors.textSoft}
@@ -341,7 +361,7 @@ export default function DispositivoCompletarScreen({ inspeccionId, onTerminar })
       </View>
 
       <View style={tarjeta}>
-        <Text style={titulo}>Fotos</Text>
+        <Text accessibilityRole="header" style={titulo}>Fotos</Text>
         <View style={styles.fila}>
           <View style={styles.flex}><CustomButton title="Sacar foto" variant="secondary" iconLeft="camera-outline" onPress={agregarFotoCamara} /></View>
           <View style={styles.flex}><CustomButton title="Galería" variant="secondary" iconLeft="images-outline" onPress={agregarFotoGaleria} /></View>
@@ -384,7 +404,7 @@ export default function DispositivoCompletarScreen({ inspeccionId, onTerminar })
 
 const styles = StyleSheet.create({
   content: { padding: 16, paddingBottom: 40, gap: 12 },
-  centro: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
+  centro: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 12 },
   card: { borderWidth: 1, borderRadius: radii.xl, padding: 14, gap: 6 },
   titulo: { fontSize: fontSizes.base },
   texto: { fontSize: fontSizes.sm },

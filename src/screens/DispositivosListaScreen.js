@@ -4,8 +4,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { hayRed } from '../services/conectividad';
 import { useTheme } from '../context/ThemeContext';
 import { statusTones } from '../theme/statusBadges';
+import CustomButton from '../components/CustomButton';
 import { getInspecciones } from '../services/dispositivosService';
-import { direccionDe, seccionesDeLista, describirEnvio, ETIQUETA_ENVIO } from '../utils/dispositivos';
+import { direccionDe, seccionesDeLista, describirEnvio, mensajeDeCarga, ETIQUETA_ENVIO } from '../utils/dispositivos';
 import { formatDate } from '../utils/dates';
 import { fontSizes, radii } from '../theme';
 
@@ -30,7 +31,7 @@ export default function DispositivosListaScreen({ onAbrir, syncTick = 0 }) {
       setItems(await getInspecciones({ refreshFromRemote: remoto }));
       setError('');
     } catch (e) {
-      setError(e?.message || 'No se pudo cargar la lista.');
+      setError(mensajeDeCarga(e, 'No se pudo cargar la lista.'));
     } finally {
       enCurso.current -= 1;
       if (enCurso.current === 0) setLoading(false);
@@ -85,7 +86,7 @@ export default function DispositivosListaScreen({ onAbrir, syncTick = 0 }) {
 
   const seccion = (titulo, lista, opciones) => lista.length ? (
     <View key={titulo} style={styles.section}>
-      <Text style={[styles.sectionTitle, { color: theme.colors.text, fontFamily: typography.bold }]}>{titulo}</Text>
+      <Text accessibilityRole="header" style={[styles.sectionTitle, { color: theme.colors.text, fontFamily: typography.bold }]}>{titulo}</Text>
       {lista.map((item) => tarjeta(item, opciones))}
     </View>
   ) : null;
@@ -94,7 +95,7 @@ export default function DispositivosListaScreen({ onAbrir, syncTick = 0 }) {
     <ScrollView style={{ flex: 1, backgroundColor: theme.colors.background }} contentContainerStyle={styles.content}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => cargar({ silencioso: true })}
         colors={[theme.colors.primary]} tintColor={theme.colors.primary} />}>
-      <Text style={[styles.title, { color: theme.colors.text, fontFamily: typography.bold }]}>Mis relevamientos</Text>
+      <Text accessibilityRole="header" style={[styles.title, { color: theme.colors.text, fontFamily: typography.bold }]}>Mis relevamientos</Text>
 
       {sinRed ? (
         <View style={[styles.aviso, { backgroundColor: statusTones.warning.bg, borderColor: statusTones.warning.bd }]}>
@@ -106,14 +107,17 @@ export default function DispositivosListaScreen({ onAbrir, syncTick = 0 }) {
       ) : null}
 
       {!!error ? (
-        <View style={[styles.aviso, { backgroundColor: statusTones.danger.bg, borderColor: statusTones.danger.bd }]}>
+        <View accessibilityRole="alert" style={[styles.aviso, { backgroundColor: statusTones.danger.bg, borderColor: statusTones.danger.bd }]}>
           <Ionicons name="alert-circle-outline" size={18} color={statusTones.danger.tx} />
           <Text style={[styles.avisoText, { color: statusTones.danger.tx, fontFamily: typography.semibold }]}>{error}</Text>
         </View>
       ) : null}
+      {!!error && !items.length ? (
+        <CustomButton title="Reintentar" variant="secondary" iconLeft="refresh" onPress={() => cargar({ silencioso: true })} />
+      ) : null}
 
       {loading && !items.length ? (
-        <View style={styles.centro}><ActivityIndicator size="large" color={theme.colors.primary} /></View>
+        <View style={styles.centro}><ActivityIndicator size="large" color={theme.colors.primary} accessibilityLabel="Cargando tus relevamientos" /></View>
       ) : (
         <>
           {seccion('Pendientes', pendientes)}

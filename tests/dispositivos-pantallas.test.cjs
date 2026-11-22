@@ -242,6 +242,65 @@ test('Detalle: con envío pendiente no se ofrece completar; con coordenadas hay 
   } finally {await libre.close();}
 });
 
+test('Detalle: un envio enviado con avisos los muestra', async () => {
+  const ui = await mountDetalle(inspeccion(1, 'Escuela A', {envio: {op_id: 'x', estado: 'enviado', avisos: ['Falta el archivo «Plano».']}}));
+  try {
+    assert.ok(ui.labels().includes('Avisos del envío'));
+    assert.ok(ui.labels().includes('• Falta el archivo «Plano».'));
+    assert.ok(ui.tree.root.findAllByProps({accessibilityRole: 'header'}).length >= 2);
+  } finally {await ui.close();}
+});
+
+test('Detalle: sin avisos no hay tarjeta de avisos', async () => {
+  const ui = await mountDetalle(inspeccion(1, 'Escuela A', {envio: {op_id: 'x', estado: 'enviado', avisos: []}}));
+  try {assert.equal(ui.labels().includes('Avisos del envío'), false);} finally {await ui.close();}
+});
+
+test('Detalle: un 404 al cargar nombra el alcance y ofrece Reintentar', async () => {
+  const {mocks} = await baseMocks();
+  let pedidos = 0;
+  Object.assign(mocks, {'../services/dispositivosService': {
+    getInspeccion: async () => { pedidos += 1; throw Object.assign(new Error('Error HTTP 404'), {status: 404, payload: {detail: 'No encontrado.'}}); },
+    reintentarFallidas: async () => ({}),
+  }});
+  const Screen = loadScreen('src/screens/DispositivoDetalleScreen.js', mocks);
+  const ui = await render(Screen, {inspeccionId: 9, onCompletar() {}});
+  try {
+    assert.ok(ui.labels().includes('No tenés acceso a este edificio o dispositivo, o ya no existe. Pedile a la coordinación que revise tu alcance.'));
+    await ui.pressButton('Reintentar');
+    assert.equal(pedidos, 2);
+  } finally {await ui.close();}
+});
+
+test('Lista: un error de carga sin datos ofrece Reintentar y un 403 nombra el alcance', async () => {
+  const {mocks} = await baseMocks();
+  let pedidos = 0;
+  Object.assign(mocks, {
+    '@react-native-community/netinfo': {__esModule: true, default: {fetch: async () => ({isConnected: true, isInternetReachable: true})}},
+    '../services/conectividad': {hayRed: async () => true, hayRedEn: () => true, escucharReconexion: () => () => {}},
+    '../services/dispositivosService': {getInspecciones: async () => { pedidos += 1; throw Object.assign(new Error('x'), {status: 403, payload: {detail: 'No.'}}); }},
+  });
+  const Screen = loadScreen('src/screens/DispositivosListaScreen.js', mocks);
+  const ui = await render(Screen, {onAbrir() {}});
+  try {
+    assert.ok(ui.labels().some(label => label.startsWith('No tenés acceso a este edificio o dispositivo')));
+    assert.ok(ui.tree.root.findAllByProps({accessibilityRole: 'header'}).length >= 1);
+    await ui.pressButton('Reintentar');
+    assert.equal(pedidos, 2);
+  } finally {await ui.close();}
+});
+
+test('esFueraDeAlcance: 404 y 403 si; SIN_MODULO, clave provisoria y 500 no', () => {
+  const u = loadPure('src/utils/dispositivos.js');
+  assert.equal(u.esFueraDeAlcance({status: 404}), true);
+  assert.equal(u.esFueraDeAlcance({status: 403, payload: {detail: 'No'}}), true);
+  assert.equal(u.esFueraDeAlcance({status: 403, payload: {code: 'SIN_MODULO'}}), false);
+  assert.equal(u.esFueraDeAlcance({status: 403, payload: {codigo: 'CLAVE_PROVISORIA'}}), false);
+  assert.equal(u.esFueraDeAlcance({status: 500}), false);
+  assert.equal(u.mensajeDeCarga({status: 500, message: 'Boom'}, 'base'), 'Boom');
+  assert.equal(u.mensajeDeCarga({}, 'base'), 'base');
+});
+
 // ---- Completar ----
 
 async function mountCompletar(detalle, options = {}) {
