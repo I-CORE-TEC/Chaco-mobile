@@ -872,6 +872,7 @@ async function montarApp({integrantes = null, ficha = null} = {}) {
     '../components/Banner': {__esModule: true, default: 'Banner'},
     '../components/CustomButton': {__esModule: true, default: 'CustomButton'},
     '../components/SettingsPanel': {__esModule: true, default: 'SettingsPanel'},
+    '../hooks/useBotonAtras': {__esModule: true, default: (opciones) => { pantallas.atras = opciones; }},
     '../screens/EmergenciaInicioScreen': {__esModule: true, default: capturar('inicio')},
     '../screens/EmergenciaMisEnviosScreen': {__esModule: true, default: capturar('envios')},
     '../screens/EmergenciaFormulario1Screen': {__esModule: true, default: capturar('formulario')},
@@ -1064,4 +1065,48 @@ test('Integrantes: con el caso alojado o cerrado se olvida el «Agregar persona�
     await renderer.act(async () => { await esperar(20); });
     assert.equal(await env.llegadas.agregarPendiente(sesion, 184), null);
   } finally { await segunda.close(); }
+});
+
+test('Cambio 553: Buscar con la familia derivada a otro edificio muestra el mensaje del back y no ofrece «Avisar a la mesa» ni «Ingresar igual»', async () => {
+  const MENSAJE = 'La familia ya está derivada a el edificio Sur de este dispositivo. Pedile a la mesa que lo resuelva.';
+  let resultado = {...SIN_DERIVACION, mensaje: MENSAJE, puede_ingresar_igual: false, puede_avisar_a_la_mesa: false,
+    derivada_a_otro_edificio: true, edificio_derivado: {id: 5, nombre: 'Sur'}};
+  const ui = await montarBuscar(() => response(200, resultado));
+  try {
+    await ui.escribir('DNI', '30111222');
+    await ui.pressButton('Buscar');
+    assert.ok(ui.labels().includes(MENSAJE));
+    assert.ok(!ui.button('Avisar a la mesa') && !ui.button('Ingresar igual'));
+    assert.ok(!ui.labels().some(l => l.startsWith('Tu usuario no puede ingresar a la familia')), 'no es un usuario sin permisos');
+    assert.ok(!ui.labels().some(l => /camas libres/.test(l)), 'no se anuncian camas: no se va a ingresar acá');
+    // Aunque el back mandara las banderas en true, la marca manda.
+    resultado = {...resultado, puede_ingresar_igual: true, puede_avisar_a_la_mesa: true};
+    await ui.pressButton('Buscar');
+    assert.ok(!ui.button('Avisar a la mesa') && !ui.button('Ingresar igual'));
+    // Sin mensaje, la app nombra el edificio.
+    resultado = {...resultado, mensaje: ''};
+    await ui.pressButton('Buscar');
+    assert.ok(ui.labels().includes('La familia ya está derivada a el edificio Sur de este dispositivo.'));
+    // Sin la marca (otra familia) todo vuelve a ofrecerse.
+    resultado = {...SIN_DERIVACION};
+    await ui.pressButton('Buscar');
+    assert.ok(ui.button('Avisar a la mesa') && ui.button('Ingresar igual'));
+    assert.deepEqual(ui.eventos, []);
+  } finally { await ui.close(); }
+});
+
+test('Cambio 553: la derivación muestra el edificio solo si viene', async () => {
+  const con = await montarDerivacion(() => response(200, ACEPTACION), {busqueda: {...BUSQUEDA, derivacion: {...DERIVACION, edificio: {id: 4, nombre: 'Edificio Norte'}}}});
+  try {
+    assert.ok(con.labels().includes('Edificio'));
+    assert.ok(con.labels().includes('Edificio Norte'));
+  } finally { await con.close(); }
+  const sin = await montarDerivacion(() => response(200, ACEPTACION));
+  try {
+    assert.ok(!sin.labels().includes('Edificio'), 'un dispositivo de un solo edificio no cambia');
+  } finally { await sin.close(); }
+  const nulo = await montarDerivacion(() => response(200, ACEPTACION), {busqueda: {...BUSQUEDA, derivacion: {...DERIVACION, edificio: null}}});
+  try {
+    assert.ok(!nulo.labels().includes('Edificio'));
+  } finally { await nulo.close(); }
 });

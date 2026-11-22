@@ -159,7 +159,7 @@ async function entorno(rutas) {
   return {runtime, calls, toasts, alerts, llegadas, mocks};
 }
 
-async function montarFicha(rutas, {online = true, caso = CASO, antes, env: previo} = {}) {
+async function montarFicha(rutas, {online = true, caso = CASO, antes, env: previo, props = {}} = {}) {
   const env = previo || await entorno(rutas);
   env.runtime.setOnline(online);
   if (antes) await antes(env);
@@ -169,7 +169,7 @@ async function montarFicha(rutas, {online = true, caso = CASO, antes, env: previ
   const ui = await render(Screen, {caso, n: 2, dispositivo: {id: 9, nombre: 'Escuela 12'},
     onTerminar: r => eventos.push(['terminar', plano(r)]), onConflicto: c => eventos.push(['conflicto', plano(c)]),
     onNoEncontrado: () => eventos.push(['no_encontrado']), onSinModulo: m => eventos.push(['sin_modulo', m]),
-    onEnviando: v => enviando.push(v)});
+    onEnviando: v => enviando.push(v), ...props});
   await renderer.act(async () => { await esperar(10); });
   const fecha = async (valor) => renderer.act(async () => { ui.tree.root.findByType('FechaInput').props.onSelect(valor); });
   const llenarMinimo = async ({fechaNacimiento = '10/03/1990'} = {}) => {
@@ -545,6 +545,7 @@ async function montarApp() {
     '../components/Banner': {__esModule: true, default: 'Banner'},
     '../components/CustomButton': {__esModule: true, default: 'CustomButton'},
     '../components/SettingsPanel': {__esModule: true, default: 'SettingsPanel'},
+    '../hooks/useBotonAtras': {__esModule: true, default: (opciones) => { pantallas.atras = opciones; }},
     ...Object.fromEntries(['Inicio', 'MisEnvios', 'Formulario1', 'MisDispositivos', 'Entregas', 'RecibirEntrega', 'LlegadaBuscar', 'Derivacion',
       'Integrantes', 'Ficha', 'Cierre', 'Puerta'].map(n => [`../screens/Emergencia${n}Screen`, {__esModule: true, default: capturar(n)}])),
     '@react-native-community/netinfo': {__esModule: true, default: {addEventListener: () => () => {}}},
@@ -775,5 +776,81 @@ test('MINOR B (PR #30): salir sin elegir no pierde el conflicto; lo tipeado mien
     await ui.escribir('Escuela', 'Tipeado en el medio');
     await renderer.act(async () => { soltar(); await esperar(10); });
     assert.equal(ui.input('Escuela').props.value, 'Tipeado en el medio');
+  } finally { await ui.close(); }
+});
+
+// ---- Cambio 553: adulto responsable, edificio en el mapa y avisos de cambios ----
+
+const FAMILIA = [
+  {n: 1, es_adulto: true, persona: {id: 9, nombre: 'Benítez, Rosa', dni: '30111222'}, responsable: null},
+  {n: 2, es_adulto: true, persona: {id: 10, nombre: 'Benítez, Juan', dni: '45111222'}, responsable: null},
+  {n: 3, es_adulto: true, persona: {id: 11, nombre: 'Benítez, Ana', dni: '30111223'}, responsable: null},
+  {n: 4, es_adulto: false, persona: {id: 12, nombre: 'Benítez, Luz', dni: '50111224'}, responsable: null},
+];
+
+test('Cambio 553: el adulto responsable de un menor se elige entre los adultos del grupo (sin la propia persona) y manda su orden y su nombre', async () => {
+  const ui = await montarFicha(rutasDe(), {props: {integrantes: FAMILIA}});
+  try {
+    await ui.llenarMinimo({fechaNacimiento: '10/03/2015'});
+    assert.ok(!ui.input('Adulto responsable'), 'con adultos en el grupo no hay texto libre');
+    const opciones = ui.pressables().filter(p => p.props.accessibilityLabel?.startsWith('Adulto responsable: ')).map(p => p.props.accessibilityLabel);
+    assert.deepEqual(opciones, ['Adulto responsable: Benítez, Rosa', 'Adulto responsable: Benítez, Ana'],
+      'solo es_adulto, sin la persona 2 (ella misma) ni la persona 4 (no es adulto)');
+    await ui.pressButton('Confirmar persona');
+    assert.equal(confirmaciones(ui.calls).length, 0, 'sin elegir no manda');
+    await ui.press('Adulto responsable: Benítez, Ana');
+    assert.equal(ui.pressables().find(p => p.props.accessibilityLabel === 'Adulto responsable: Benítez, Ana').props.accessibilityState.selected, true);
+    await ui.pressButton('Confirmar persona');
+    assert.deepEqual(confirmaciones(ui.calls)[0].body.ficha.observaciones, {adulto_responsable: 'Benítez, Ana', adulto_responsable_orden: '3'});
+  } finally { await ui.close(); }
+});
+
+test('Cambio 553: elegir otro adulto cambia el orden; tocar al elegido lo quita; sin adultos en el grupo queda el texto libre y no manda orden', async () => {
+  const ui = await montarFicha(rutasDe(), {props: {integrantes: FAMILIA}});
+  try {
+    await ui.llenarMinimo({fechaNacimiento: '10/03/2015'});
+    await ui.press('Adulto responsable: Benítez, Ana');
+    await ui.press('Adulto responsable: Benítez, Rosa');
+    await ui.press('Adulto responsable: Benítez, Rosa');
+    await ui.pressButton('Confirmar persona');
+    assert.equal(confirmaciones(ui.calls).length, 0, 'tocar al elegido lo deja sin elegir');
+    await ui.press('Adulto responsable: Benítez, Rosa');
+    await ui.pressButton('Confirmar persona');
+    assert.deepEqual(confirmaciones(ui.calls)[0].body.ficha.observaciones, {adulto_responsable: 'Benítez, Rosa', adulto_responsable_orden: '1'});
+  } finally { await ui.close(); }
+  const sin = await montarFicha(rutasDe(), {props: {integrantes: FAMILIA.map(i => ({...i, es_adulto: false}))}});
+  try {
+    await sin.llenarMinimo({fechaNacimiento: '10/03/2015'});
+    assert.ok(sin.input('Adulto responsable'), 'sin adultos confirmados, texto libre (Cambio 527)');
+    assert.ok(!sin.pressables().some(p => p.props.accessibilityLabel?.startsWith('Adulto responsable: ')));
+    await sin.escribir('Adulto responsable', 'Rosa Benítez');
+    await sin.pressButton('Confirmar persona');
+    assert.deepEqual(confirmaciones(sin.calls)[0].body.ficha.observaciones, {adulto_responsable: 'Rosa Benítez'});
+  } finally { await sin.close(); }
+});
+
+test('Cambio 553: el mapa de camas muestra el edificio del sector solo si viene', async () => {
+  const conEdificio = {...MAPA, sectores: [{...MAPA.sectores[0], sector: {...MAPA.sectores[0].sector, edificio: {id: 4, nombre: 'Edificio Norte'}}},
+    {...MAPA.sectores[1], sector: {...MAPA.sectores[1].sector, edificio: null}}]};
+  const ui = await montarFicha(rutasDe({mapa: () => conEdificio}));
+  try {
+    await ui.pressButton('Cambiar cama');
+    assert.ok(ui.labels().includes('Edificio Norte · Pabellón A · Familias'));
+    assert.ok(ui.labels().includes('Pabellón B'), 'un sector sin edificio no cambia');
+  } finally { await ui.close(); }
+  const sin = await montarFicha(rutasDe());
+  try {
+    await sin.pressButton('Cambiar cama');
+    assert.ok(sin.labels().includes('Pabellón A · Familias'));
+  } finally { await sin.close(); }
+});
+
+test('Cambio 553: la ficha avisa al padre lo cargado sin mandar', async () => {
+  const cambios = [];
+  const ui = await montarFicha(rutasDe(), {props: {onCambios: v => cambios.push(v)}});
+  try {
+    assert.equal(cambios.at(-1), false, 'al abrir no hay nada cargado');
+    await ui.press('Parentesco: Hijo/a');
+    assert.equal(cambios.at(-1), true);
   } finally { await ui.close(); }
 });

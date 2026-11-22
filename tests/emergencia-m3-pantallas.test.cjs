@@ -238,6 +238,7 @@ async function montarRecibir(rutas, {online = true, entrega = ENTREGA, antes, jp
   const borrados = [];
   const olvidados = [];
   const enviando = [];
+  const cambios = [];
   Object.assign(env.mocks, {
     'expo-file-system/legacy': {deleteAsync: async (uri) => { borrados.push(uri); }},
     '../services/webAttachments': {forgetWebFile: (uri) => { olvidados.push(uri); return true; }},
@@ -254,7 +255,7 @@ async function montarRecibir(rutas, {online = true, entrega = ENTREGA, antes, jp
   const Screen = loadScreen('src/screens/EmergenciaRecibirEntregaScreen.js', env.mocks);
   const normalizada = env.kits.normalizarEntrega(entrega);
   const ui = await render(Screen, {entrega: normalizada, dispositivoId: 7, onTerminar: (m, d) => terminados.push([m, plano(d)]),
-    onSinModulo: m => sinModulo.push(m), onEnviando: v => enviando.push(v)});
+    onSinModulo: m => sinModulo.push(m), onEnviando: v => enviando.push(v), onCambios: v => cambios.push(v)});
   const sacarRemito = async () => {
     await ui.pressButton('Sacar foto del remito');
     const [titulo, , opciones] = env.alerts.at(-1);
@@ -266,7 +267,7 @@ async function montarRecibir(rutas, {online = true, entrega = ENTREGA, antes, jp
     assert.ok(opcion, 'Falta la opción ' + texto);
     await renderer.act(async () => { await opcion.onPress(); await esperar(5); });
   };
-  return {...env, ...ui, conversiones, liberadas, terminados, sinModulo, borrados, olvidados, enviando, sacarRemito, aceptarAlerta, entrega: normalizada};
+  return {...env, ...ui, conversiones, liberadas, terminados, sinModulo, borrados, olvidados, enviando, cambios, sacarRemito, aceptarAlerta, entrega: normalizada};
 }
 const ok = (estado = 'RECIBIDA', diferencias = []) => () => response(200, {estado, diferencias});
 
@@ -748,5 +749,22 @@ test('Recibir: una incierta recuperada se verifica sola al abrir; con la entrega
     assert.equal(ui.input('Cantidad recibida de Colchón').props.editable, true);
     assert.equal(ui.input('Cantidad recibida de Colchón').props.value, '9');
     assert.ok(ui.calls.some(c => c.method === 'GET'));
+  } finally { await ui.close(); }
+});
+
+test('Recibir (Atrás): avisa al padre solo cuando hay algo cargado sin mandar (otra cantidad, observación o remito)', async () => {
+  const ui = await montarRecibir(ok());
+  try {
+    assert.equal(ui.cambios.at(-1), false, 'lo precargado del envío no cuenta');
+    await ui.escribir('Cantidad recibida de Colchón', '9');
+    assert.equal(ui.cambios.at(-1), true);
+    await ui.escribir('Cantidad recibida de Colchón', '10');
+    assert.equal(ui.cambios.at(-1), false, 'volver a la cantidad enviada deja de contar');
+    await ui.escribir('Observación', 'Llegó mojado');
+    assert.equal(ui.cambios.at(-1), true);
+    await ui.escribir('Observación', '');
+    assert.equal(ui.cambios.at(-1), false);
+    await ui.sacarRemito();
+    assert.equal(ui.cambios.at(-1), true, 'la foto del remito sin mandar cuenta');
   } finally { await ui.close(); }
 });

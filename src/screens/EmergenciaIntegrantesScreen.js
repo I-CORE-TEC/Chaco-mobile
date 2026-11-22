@@ -25,7 +25,7 @@ const CIERRES = {
 // M2-3 · Integrantes de la familia (§13.5): el contador «1 de 7 confirmadas», una fila por persona y
 // «Agregar persona». Con la familia alojada o el caso cerrado, modo lectura. Con conexión: sin red no
 // se carga nada (no hay lectura guardada) y se avisa; al volver la red se carga sola.
-// Tocar una persona abre su ficha (`onAbrirPersona(integrante, caso)`): sin confirmar, para confirmarla
+// Tocar una persona abre su ficha (`onAbrirPersona(integrante, caso, integrantes)`): sin confirmar, para confirmarla
 // con su cama (solo con el ingreso en curso); confirmada, para ver y completar las secciones 4 a 8
 // (también con la familia alojada; con el caso cerrado, en lectura). El cierre que corresponde al
 // contador (§13.9) abre su pantalla: `onCerrar(cierre, datos)`, con `cierre` 'alojar', 'diferencia' o
@@ -323,7 +323,7 @@ export default function EmergenciaIntegrantesScreen({
     const cuerpo = (
       <Pressable key={String(integrante.n)} accessibilityRole="button" accessibilityLabel={etiquetaA11y}
         accessibilityHint={deshabilitada ? undefined : accion} accessibilityState={{ disabled: deshabilitada }} disabled={deshabilitada}
-        onPress={() => onAbrirPersona?.(integrante, datos?.caso || casoInicial)}
+        onPress={() => onAbrirPersona?.(integrante, datos?.caso || casoInicial, datos?.integrantes || [])}
         style={({ pressed }) => [styles.persona, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }, pressed && styles.presionada]}>
         <View style={styles.cabecera}>
           <Text style={[styles.flex, styles.nombre, { color: theme.colors.text, fontFamily: typography.bold }]}>{`${integrante.n}. ${titulo}`}</Text>

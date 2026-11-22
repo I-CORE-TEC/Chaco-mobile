@@ -206,6 +206,7 @@ test('m2: EmergenciaApp pasa «syncing» al Banner mientras carga el perfil', as
     '../components/Banner': {__esModule: true, default: 'Banner'},
     '../components/CustomButton': {__esModule: true, default: 'CustomButton'},
     '../components/SettingsPanel': {__esModule: true, default: 'SettingsPanel'},
+    '../hooks/useBotonAtras': {__esModule: true, default: () => {}},
     '../screens/EmergenciaInicioScreen': {__esModule: true, default: props => { onCargando = props.onCargando; return null; }},
     '../screens/EmergenciaMisEnviosScreen': {__esModule: true, default: () => null},
     '../screens/EmergenciaFormulario1Screen': {__esModule: true, default: () => null},

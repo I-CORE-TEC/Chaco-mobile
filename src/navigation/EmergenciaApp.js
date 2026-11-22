@@ -7,6 +7,7 @@ import { useToast } from '../context/ToastContext';
 import Banner from '../components/Banner';
 import CustomButton from '../components/CustomButton';
 import SettingsPanel from '../components/SettingsPanel';
+import useBotonAtras from '../hooks/useBotonAtras';
 import EmergenciaInicioScreen from '../screens/EmergenciaInicioScreen';
 import EmergenciaMisEnviosScreen from '../screens/EmergenciaMisEnviosScreen';
 import EmergenciaFormulario1Screen from '../screens/EmergenciaFormulario1Screen';
@@ -47,6 +48,16 @@ const TITULOS_CIERRE = { alojar: 'Familia alojada', diferencia: 'Cerrar con dife
 const VISTAS_RECARGABLES = ['inicio', 'kits_dispositivos', 'kits_entregas', 'llegadas_dispositivos', 'llegadas_integrantes', 'llegadas_ficha'];
 const VISTAS_M1 = ['envios', 'formulario'];
 const INICIO = { vista: 'inicio', uuid: null };
+// Las pantallas con algo cargado que Atrás no tiene que perder en silencio: piden confirmar. Cada una avisa
+// con `onCambios(bool)` si hay algo sin mandar; el texto dice qué pasa con lo cargado.
+const TEXTO_SALIR_PERDIENDO = 'Lo que cargaste no se mandó. Si salís, se pierde.';
+const SALIR_CON_CAMBIOS = {
+  llegadas_puerta: TEXTO_SALIR_PERDIENDO,
+  llegadas_cierre: TEXTO_SALIR_PERDIENDO,
+  llegadas_ficha: 'Lo que cargaste de esta persona queda guardado como borrador en este teléfono; lo retomás cuando vuelvas a abrirla.',
+  kits_recibir: 'Las cantidades y la observación quedan guardadas en este teléfono; la foto del remito hay que volver a sacarla.',
+};
+export const TEXTO_ENVIANDO = 'Se está enviando. Esperá un momento.';
 // El mismo texto que TEXTO_PERSONA_NO_ENCONTRADA de emergenciaLlegadas (el router no importa servicios).
 const TEXTO_PERSONA_NO_ENCONTRADA = 'Esa persona ya no está en la familia, o el caso ya no es de tu dispositivo. Se vuelven a cargar los integrantes.';
 
@@ -92,6 +103,16 @@ export default function EmergenciaApp({ onCambiarModulo }) {
   // confirmar a una persona o guardar su ficha, cerrar el ingreso, ingresar igual o avisar a la mesa):
   // no se sale de la pantalla hasta saber el resultado.
   const [enviando, setEnviando] = useState(false);
+  // Lo cargado sin mandar de la pantalla abierta ({ vista, valor }): lo informa cada pantalla con `onCambios`.
+  const cambiosPantalla = useRef({ vista: null, valor: false });
+  const marcarCambios = (deVista) => (valor) => { cambiosPantalla.current = { vista: deVista, valor: !!valor }; };
+  // Al cambiar de pantalla (aunque sea la misma vista con otra persona) lo cargado de la anterior no vale: se lee
+  // al renderizar, antes de que la pantalla nueva pueda avisar algo.
+  const pantallaDeCambios = useRef(null);
+  if (pantallaDeCambios.current !== pantalla) {
+    pantallaDeCambios.current = pantalla;
+    cambiosPantalla.current = { vista: null, valor: false };
+  }
   // Hasta cuándo (ms) el back pidió no buscar por DNI (429 de §13.2): sobrevive a volver y re-entrar.
   const [esperaBuscarHasta, setEsperaBuscarHasta] = useState(0);
   // La pasada de fondo en curso (su promesa) y si hay una manual: la manual espera a la de fondo.
@@ -288,8 +309,10 @@ export default function EmergenciaApp({ onCambiarModulo }) {
     ...actual, vista: 'llegadas_integrantes', caso, dni: dni ?? actual.dni, n: (actual.n || 0) + 1,
   }));
   // Una persona de la familia (§13.6 a §13.8). `caso` es el de los integrantes (con su estado).
-  const verPersona = (integrante, caso) => setPantalla((actual) => ({
-    ...actual, vista: 'llegadas_ficha', persona: { n: integrante.n }, caso: caso || actual.caso, n: (actual.n || 0) + 1,
+  // `integrantes`: la familia tal como la mostraron los integrantes (con `es_adulto`): de ahí sale el selector
+  // del adulto responsable de un menor.
+  const verPersona = (integrante, caso, integrantes = []) => setPantalla((actual) => ({
+    ...actual, vista: 'llegadas_ficha', persona: { n: integrante.n, integrantes }, caso: caso || actual.caso, n: (actual.n || 0) + 1,
   }));
   // Confirmada o guardada: a los integrantes, que se recargan al montarse.
   const terminarPersona = () => {
@@ -365,8 +388,11 @@ export default function EmergenciaApp({ onCambiarModulo }) {
     : (['kits_entregas', 'llegadas_buscar'].includes(vista) && pantalla.dispositivo?.nombre)
       || (vista === 'llegadas_ficha' && pantalla.persona?.n != null && `Persona ${pantalla.persona.n}`)
       || (vista === 'llegadas_cierre' && TITULOS_CIERRE[pantalla.cierre]) || TITULOS[vista];
-  const volver = () => {
-    if (enviando) return;
+  const vistaVigente = useRef(vista);
+  vistaVigente.current = vista;
+  const enviandoVigente = useRef(enviando);
+  enviandoVigente.current = enviando;
+  const irAtras = () => {
     if (vista === 'formulario') setPantalla({ vista: 'envios', uuid: null });
     else if (vista === 'kits_recibir') verEntregas();
     else if (vista === 'kits_entregas' && !pantalla.unico) verDispositivos();
@@ -376,6 +402,33 @@ export default function EmergenciaApp({ onCambiarModulo }) {
     else setPantalla(INICIO);
     refrescarEstado();
   };
+  // Vale para el botón del encabezado, el Atrás de Android y el del navegador: frena mientras se envía y
+  // pide confirmar con algo cargado sin mandar.
+  const volver = () => {
+    if (enviando) {
+      showToast({ type: 'info', message: TEXTO_ENVIANDO });
+      return;
+    }
+    const cargado = cambiosPantalla.current;
+    if (SALIR_CON_CAMBIOS[vista] && cargado.vista === vista && cargado.valor) {
+      showAlert('¿Salir sin enviar?', SALIR_CON_CAMBIOS[vista], [
+        { text: 'Seguir cargando', style: 'cancel' },
+        {
+          text: 'Salir',
+          style: 'destructive',
+          // El envío pudo arrancar mientras el diálogo seguía abierto, o la pantalla cambiar: se lee lo vigente.
+          onPress: () => {
+            if (vistaVigente.current !== vista) return;
+            if (enviandoVigente.current) { showToast({ type: 'info', message: TEXTO_ENVIANDO }); return; }
+            irAtras();
+          },
+        },
+      ]);
+      return;
+    }
+    irAtras();
+  };
+  useBotonAtras({ activo: vista !== 'inicio', alAtras: volver });
   let syncStatus = 'synced';
   if (sincronizando || cargandoPerfil) syncStatus = 'syncing';
   else if (pendientes > 0) syncStatus = 'pending';
@@ -409,7 +462,7 @@ export default function EmergenciaApp({ onCambiarModulo }) {
         {vista === 'kits_recibir' ? (
           <EmergenciaRecibirEntregaScreen key={String(pantalla.entrega?.id)} entrega={pantalla.entrega}
             dispositivoId={pantalla.dispositivo?.id ?? null} onTerminar={terminarRecepcion} onSinModulo={sinModulo}
-            onEnviando={setEnviando} />
+            onEnviando={setEnviando} onCambios={marcarCambios('kits_recibir')} />
         ) : null}
         {vista === 'llegadas_dispositivos' ? (
           <EmergenciaMisDispositivosScreen key="llegadas" modo="llegadas" recarga={recarga} onElegir={elegirDispositivoLlegadas}
@@ -434,22 +487,25 @@ export default function EmergenciaApp({ onCambiarModulo }) {
         ) : null}
         {vista === 'llegadas_ficha' ? (
           <EmergenciaFichaScreen key={`ficha-${pantalla.caso?.id}-${pantalla.persona?.n}-${pantalla.n}`} caso={pantalla.caso}
-            n={pantalla.persona?.n} dispositivo={pantalla.dispositivo} recarga={recarga} onTerminar={terminarPersona}
-            onConflicto={recargarPorEstado} onNoEncontrado={personaNoEncontrada} onSinModulo={sinModulo} onEnviando={setEnviando} />
+            n={pantalla.persona?.n} dispositivo={pantalla.dispositivo} integrantes={pantalla.persona?.integrantes || []} recarga={recarga}
+            onTerminar={terminarPersona} onConflicto={recargarPorEstado} onNoEncontrado={personaNoEncontrada} onSinModulo={sinModulo}
+            onEnviando={setEnviando} onCambios={marcarCambios('llegadas_ficha')} />
         ) : null}
         {vista === 'llegadas_cierre' ? (
           <EmergenciaCierreScreen key={`cierre-${pantalla.caso?.id}-${pantalla.cierre}-${pantalla.n}`} caso={pantalla.caso} cierre={pantalla.cierre}
             confirmadas={pantalla.cierreDatos?.confirmadas ?? 0} total={pantalla.cierreDatos?.total ?? 0}
             integrantes={pantalla.cierreDatos?.integrantes || []} derivacion={pantalla.cierreDatos?.derivacion ?? null}
             dispositivo={pantalla.dispositivo} onCerrado={terminarCierre}
-            onConflicto={recargarPorEstado} onNoEncontrado={llegadaNoEncontrada} onSinModulo={sinModulo} onEnviando={setEnviando} />
+            onConflicto={recargarPorEstado} onNoEncontrado={llegadaNoEncontrada} onSinModulo={sinModulo} onEnviando={setEnviando}
+            onCambios={marcarCambios('llegadas_cierre')} />
         ) : null}
         {vista === 'llegadas_puerta' ? (
           <EmergenciaPuertaScreen key={`puerta-${pantalla.dispositivo?.id}-${pantalla.dni}-${pantalla.n}`} dispositivo={pantalla.dispositivo}
             dni={pantalla.dni} plazasLibres={pantalla.puerta?.plazasLibres ?? 0} accion={pantalla.puerta?.accion}
             mensaje={pantalla.puerta?.mensaje || ''} puedeIngresarIgual={pantalla.puerta?.puedeIngresarIgual ?? null}
             puedeAvisarALaMesa={pantalla.puerta?.puedeAvisarALaMesa ?? null} onIngresado={ingresoDirecto} onAvisado={avisoALaMesa}
-            onNoEncontrado={llegadaNoEncontrada} onSinModulo={sinModulo} onEnviando={setEnviando} />
+            onNoEncontrado={llegadaNoEncontrada} onSinModulo={sinModulo} onEnviando={setEnviando}
+            onCambios={marcarCambios('llegadas_puerta')} />
         ) : null}
       </View>
       {vista === 'inicio' ? (

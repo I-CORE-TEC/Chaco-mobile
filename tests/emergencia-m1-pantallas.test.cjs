@@ -736,6 +736,7 @@ async function montarApp({pendientes = 0, resumen = null, enCurso = null, sync =
     '../context/AuthContext': {useAuth: () => ({user: {nombre: 'Ana'}, logout() { llamadas.logout += 1; }})},
     '../components/Banner': {__esModule: true, default: 'Banner'},
     '../components/SettingsPanel': {__esModule: true, default: 'SettingsPanel'},
+    '../hooks/useBotonAtras': {__esModule: true, default: (opciones) => { pantallas.atras = opciones; }},
     '../screens/EmergenciaInicioScreen': {__esModule: true, default: capturar('inicio')},
     '../screens/EmergenciaMisEnviosScreen': {__esModule: true, default: capturar('envios')},
     '../screens/EmergenciaFormulario1Screen': {__esModule: true, default: capturar('formulario')},
@@ -1178,5 +1179,46 @@ test('EmergenciaApp nativo: al volver la red sincroniza por NetInfo', async () =
     assert.equal(ui.llamadas.sync, 1, 'sin red no sincroniza');
     await renderer.act(async () => { ui.llamadas.netinfo({isConnected: true, isInternetReachable: true}); await esperar(5); });
     assert.equal(ui.llamadas.sync, 2);
+  } finally { await ui.close(); }
+});
+
+test('EmergenciaApp (Atrás): Recibir entrega frena mientras se manda y pide confirmar con algo cargado; «Salir» vuelve a las entregas', async () => {
+  const ui = await montarApp();
+  const banner = () => ui.tree.root.findByType('Banner');
+  const hacer = fn => renderer.act(async () => { await fn(); });
+  try {
+    assert.equal(ui.pantallas.atras.activo, false, 'en el inicio Atrás es del sistema');
+    await hacer(() => ui.pantallas.inicio.onAbrir({clave: 'kits', titulo: 'Recepción de kits'}));
+    await hacer(() => ui.pantallas.kitsDispositivos.onElegir({id: 7, nombre: 'Club'}, {unico: false}));
+    await hacer(() => ui.pantallas.kitsEntregas.onAbrir({id: 31, numero: 'K-31', lineas: []}));
+    assert.equal(ui.pantallas.atras.activo, true);
+    // Mandando: aviso y nada más.
+    await hacer(() => ui.pantallas.kitsRecibir.onEnviando(true));
+    await hacer(() => ui.pantallas.atras.alAtras());
+    assert.equal(ui.toasts.at(-1).message, 'Se está enviando. Esperá un momento.');
+    assert.equal(banner().props.title, 'Recibir entrega');
+    assert.equal(ui.alerts.filter(a => a[0] === '¿Salir sin enviar?').length, 0);
+    await hacer(() => ui.pantallas.kitsRecibir.onEnviando(false));
+    // Con algo cargado: pide confirmar; «Seguir cargando» no sale.
+    await hacer(() => ui.pantallas.kitsRecibir.onCambios(true));
+    await hacer(() => ui.pantallas.atras.alAtras());
+    const alerta = ui.alerts.at(-1);
+    assert.equal(alerta[0], '¿Salir sin enviar?');
+    assert.equal(alerta[2].map(o => o.text).join('|'), 'Seguir cargando|Salir');
+    assert.equal(banner().props.title, 'Recibir entrega');
+    // El envío arranca con el diálogo abierto: «Salir» no sale.
+    await hacer(() => ui.pantallas.kitsRecibir.onEnviando(true));
+    await hacer(() => alerta[2][1].onPress());
+    assert.equal(banner().props.title, 'Recibir entrega');
+    await hacer(() => ui.pantallas.kitsRecibir.onEnviando(false));
+    await hacer(() => ui.pantallas.atras.alAtras());
+    await hacer(() => ui.alerts.at(-1)[2][1].onPress());
+    assert.equal(banner().props.title, 'Club');
+    // Sin cambios (otra entrega) no pregunta.
+    const antes = ui.alerts.length;
+    await hacer(() => ui.pantallas.kitsEntregas.onAbrir({id: 32, numero: 'K-32', lineas: []}));
+    await hacer(() => ui.pantallas.atras.alAtras());
+    assert.equal(ui.alerts.length, antes, 'lo cargado en la entrega anterior no se arrastra');
+    assert.equal(banner().props.title, 'Club');
   } finally { await ui.close(); }
 });

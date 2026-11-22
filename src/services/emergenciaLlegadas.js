@@ -87,6 +87,13 @@ export const normalizarCaso = (caso) => {
   };
 };
 
+// Cambio 553 (aditivo): `{ id, nombre }` o `null` (sin la clave, sin edificio cargado o con un back anterior).
+export const normalizarEdificio = (valor) => {
+  if (!valor || typeof valor !== 'object' || Array.isArray(valor) || valor.id == null) return null;
+  const nombre = textoPlano(valor.nombre).trim();
+  return nombre ? { id: valor.id, nombre } : null;
+};
+
 const GRUPO = [
   ['menores_f', 'Menores (F)'], ['menores_m', 'Menores (M)'], ['adultos_f', 'Adultos (F)'], ['adultos_m', 'Adultos (M)'],
   ['mayores_f', 'Mayores (F)'], ['mayores_m', 'Mayores (M)'],
@@ -136,6 +143,8 @@ const normalizarDerivacion = (derivacion) => {
     necesidades: (Array.isArray(derivacion.necesidades) ? derivacion.necesidades : []).filter((n) => typeof n === 'string'),
     telefono: textoPlano(derivacion.telefono),
     observaciones: textoPlano(derivacion.observaciones).trim(),
+    // Cambio 553: el edificio al que va la familia; `null` si no viene (un solo edificio o back anterior).
+    edificio: normalizarEdificio(derivacion.edificio),
   };
 };
 
@@ -154,15 +163,26 @@ export const normalizarBusqueda = (payload) => {
     // Cambio 532 (aditivas): `null` con un back que no las manda.
     puede_ingresar_igual: typeof datos.puede_ingresar_igual === 'boolean' ? datos.puede_ingresar_igual : null,
     puede_avisar_a_la_mesa: typeof datos.puede_avisar_a_la_mesa === 'boolean' ? datos.puede_avisar_a_la_mesa : null,
+    // Cambio 553 (aditivas): la familia ya está derivada a OTRO edificio del dispositivo (con `SIN_DERIVACION`).
+    derivada_a_otro_edificio: datos.derivada_a_otro_edificio === true,
+    edificio_derivado: normalizarEdificio(datos.edificio_derivado),
   };
 };
 
 // Qué botones de M2-6 ofrece una búsqueda SIN_DERIVACION (§13.2): el back dice el alcance; la app solo
 // suma las camas. Con un back que no manda las banderas (`null`) se ofrecen como antes.
-export const accionesSinDerivacion = (busqueda) => ({
-  ingresar: busqueda?.puede_ingresar_igual !== false && (busqueda?.plazas_libres ?? 0) >= 1,
-  avisar: busqueda?.puede_avisar_a_la_mesa !== false,
-});
+// Con la familia derivada a otro edificio (Cambio 553) no se ofrece ninguna: «Avisar a la mesa» crearía un
+// caso duplicado (el back lo rechaza con 400) y «Ingresar igual» también.
+export const accionesSinDerivacion = (busqueda) => {
+  if (busqueda?.derivada_a_otro_edificio === true) return { ingresar: false, avisar: false };
+  return {
+    ingresar: busqueda?.puede_ingresar_igual !== false && (busqueda?.plazas_libres ?? 0) >= 1,
+    avisar: busqueda?.puede_avisar_a_la_mesa !== false,
+  };
+};
+
+export const textoDerivadaAOtroEdificio = (busqueda) => (busqueda?.mensaje
+  || `La familia ya está derivada a ${busqueda?.edificio_derivado?.nombre ? `el edificio ${busqueda.edificio_derivado.nombre}` : 'otro edificio'} de este dispositivo.`);
 
 // Qué pantalla sigue a una búsqueda (§13.2): 'derivacion' (PENDIENTE: aceptar o rechazar),
 // 'integrantes' (ACEPTADA), 'sin_derivacion' o 'alojada'. Un resultado que no se entiende es
@@ -228,6 +248,8 @@ const normalizarIntegrante = (fila) => {
     // Cambios 539 y 537 (aditivas): la clave de la fila y si «Quitar persona» corresponde.
     id: fila.id ?? null,
     puede_quitarse: fila.puede_quitarse === true,
+    // Cambio 553 (aditiva): confirmada, sin egresar y de 18 años o más. Con un back anterior, `false`.
+    es_adulto: fila.es_adulto === true,
     identidad_a_revisar: normalizarIdentidadARevisar(fila.identidad_a_revisar),
   };
 };
@@ -236,6 +258,12 @@ const normalizarIntegrante = (fila) => {
 // tras una baja hay huecos y `total_declarado + 1` mentiría). Sin filas cargadas, el contador + 1.
 export const proximoNumero = ({ integrantes = [], total_declarado: total = 0 } = {}) => (
   integrantes.length ? Math.max(...integrantes.map((i) => i.n)) + 1 : (total || 0) + 1);
+
+// Los adultos que se pueden elegir como adulto responsable de la persona `n`: los integrantes con `es_adulto`
+// (Cambio 553), sin ella misma. Cada uno trae su `n` y el nombre con que se lo muestra.
+export const adultosParaElegir = (integrantes = [], n = null) => (Array.isArray(integrantes) ? integrantes : [])
+  .filter((i) => i?.es_adulto === true && String(i.n) !== String(n))
+  .map((i) => ({ n: i.n, nombre: rotuloDeIntegrante(i).nombre }));
 
 // Cómo se rotula una persona de la familia: la confirmada, con su nombre; la persona 1 sin confirmar,
 // con el responsable que cargó el caso; si no, «Persona N». `dni`: el de quien se muestra, o ''.
@@ -618,7 +646,9 @@ export const normalizarMapa = (payload) => {
       detalle: textoPlano(p.detalle).trim(),
     }));
     return {
-      sector: { id: item.sector.id, nombre: textoPlano(item.sector.nombre) || `Sector ${item.sector.id}`, perfil: textoPlano(item.sector.perfil) },
+      sector: { id: item.sector.id, nombre: textoPlano(item.sector.nombre) || `Sector ${item.sector.id}`, perfil: textoPlano(item.sector.perfil),
+        // Cambio 553: el edificio del sector; `null` si no viene.
+        edificio: normalizarEdificio(item.sector.edificio) },
       plazas,
       total: item.total != null ? entero(item.total) : plazas.length,
       libres: entero(item.libres),

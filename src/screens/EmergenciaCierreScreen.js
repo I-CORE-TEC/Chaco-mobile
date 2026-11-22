@@ -63,10 +63,11 @@ export const CIERRES = {
 // - `onCerrado(resultado)`: 200, o el «se hizo» tras un intento incierto. `resultado.cierre` dice cuál.
 // - `onConflicto(clasificacion)`: 409 de estado → el padre recarga por `estado_actual` (§13.1).
 // - `onNoEncontrado()`: 404. `onSinModulo(mensaje)`: 403. `onEnviando(bool)`: hay un envío en curso.
+// - `onCambios(bool)`: hay algo cargado sin mandar (el padre pide confirmar antes de salir con Atrás).
 // El resultado llega al padre aunque la pantalla ya no esté.
 export default function EmergenciaCierreScreen({
   caso, cierre, confirmadas = 0, total = 0, integrantes = [], dispositivo, derivacion = null,
-  onCerrado, onConflicto, onNoEncontrado, onSinModulo, onEnviando,
+  onCerrado, onConflicto, onNoEncontrado, onSinModulo, onEnviando, onCambios,
 }) {
   const { theme, typography } = useTheme();
   const { user } = useAuth();
@@ -99,6 +100,12 @@ export default function EmergenciaCierreScreen({
   const enviandoRef = useRef(false);
   // La derivación que vio la guardia al abrir: la misma en todos los envíos de esta pantalla.
   const derivacionVista = useRef(derivacion);
+
+  const hayCambios = aula.trim() !== '' || tarjeta === true || tarjetaNumero.trim() !== '' || observacion.trim() !== ''
+    || motivo !== (cierre === 'cancelar' ? '' : null);
+  useEffect(() => {
+    try { onCambios?.(hayCambios); } catch { /* Solo informa. */ }
+  }, [hayCambios]);
 
   const avisarEnviando = (valor) => {
     try {

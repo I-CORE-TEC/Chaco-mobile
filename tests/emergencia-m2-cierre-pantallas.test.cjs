@@ -152,7 +152,7 @@ const fondoDe = (tree, contenido) => {
 
 // ---- Cerrar el ingreso ----
 
-async function montarCierre(rutas, {cierre = 'alojar', confirmadas = 3, total = 3, integrantes = CONFIRMADAS, online = true, env: previo, derivacion} = {}) {
+async function montarCierre(rutas, {cierre = 'alojar', confirmadas = 3, total = 3, integrantes = CONFIRMADAS, online = true, env: previo, derivacion, props = {}} = {}) {
   const env = previo || await entorno(rutas);
   env.runtime.setOnline(online);
   const eventos = [];
@@ -162,7 +162,7 @@ async function montarCierre(rutas, {cierre = 'alojar', confirmadas = 3, total = 
     ...(derivacion !== undefined ? {derivacion} : {}),
     onCerrado: r => eventos.push(['cerrado', plano(r)]), onConflicto: c => eventos.push(['conflicto', plano(c)]),
     onNoEncontrado: () => eventos.push(['no_encontrado']), onSinModulo: m => eventos.push(['sin_modulo', m]),
-    onEnviando: v => enviando.push(v)});
+    onEnviando: v => enviando.push(v), ...props});
   await renderer.act(async () => { await esperar(10); });
   return {...env, ...ui, eventos, enviando};
 }
@@ -874,6 +874,7 @@ async function montarApp() {
     '../components/Banner': {__esModule: true, default: 'Banner'},
     '../components/CustomButton': {__esModule: true, default: 'CustomButton'},
     '../components/SettingsPanel': {__esModule: true, default: 'SettingsPanel'},
+    '../hooks/useBotonAtras': {__esModule: true, default: (opciones) => { pantallas.atras = opciones; }},
     ...Object.fromEntries(['Inicio', 'MisEnvios', 'Formulario1', 'Entregas', 'RecibirEntrega'].map(n => [`../screens/Emergencia${n}Screen`, {__esModule: true, default: capturar(n)}])),
     ...Object.fromEntries(Object.entries(nombres).map(([clave, n]) => [`../screens/Emergencia${n}Screen`, {__esModule: true, default: capturar(clave)}])),
     '@react-native-community/netinfo': {__esModule: true, default: {addEventListener: () => () => {}}},
@@ -1088,3 +1089,135 @@ test('Puerta (autoconsulta): «Buscar persona» reemplaza lo tipeado con lo del 
     assert.equal(lleno(ui).nombre, 'Rosa Maria');
   } finally { await ui.close(); }
 });
+
+// ---- Cambio 553: 400 de «Avisar a la mesa» y botón Atrás ----
+
+test('Cambio 553: el 400 de avisar-mesa (familia derivada a otro edificio) muestra el mensaje del back, manda un solo pedido y no se reintenta', async () => {
+  const MENSAJE = 'La familia ya está derivada a el edificio Sur de este dispositivo. Pedile a la mesa que lo resuelva.';
+  const ui = await montarPuerta(() => response(400, {code: 'VALIDACION', detail: MENSAJE, non_field_errors: [MENSAJE]}), {plazasLibres: 0});
+  try {
+    await ui.llenar();
+    await ui.pressButton('Avisar a la mesa');
+    await ui.aceptarAlerta('Avisar a la mesa');
+    assert.equal(posts(ui.calls).length, 1);
+    assert.ok(ui.labels().includes(MENSAJE), 'el mensaje del back, tal cual');
+    assert.equal(ui.button('Avisar a la mesa').props.disabled, true, 'no se vuelve a mandar lo mismo');
+    await ui.pressButton('Avisar a la mesa');
+    assert.equal(ui.alerts.filter(a => a[0] === 'Avisar a la mesa').length, 1, 'ni siquiera vuelve a preguntar');
+    assert.equal(posts(ui.calls).length, 1);
+    assert.deepEqual(ui.eventos, []);
+    assert.equal(ui.enviando.at(-1), false);
+  } finally { await ui.close(); }
+});
+
+test('Cambio 553: un 400 de avisar-mesa por un campo no bloquea el botón: se corrige y se manda', async () => {
+  let paso = 0;
+  const ui = await montarPuerta(() => { paso += 1; return paso === 1 ? response(400, {code: 'VALIDACION', detail: 'x', nombre: ['Escribí el nombre del responsable.']}) : response(201, AVISO); },
+    {plazasLibres: 0});
+  try {
+    await ui.llenar();
+    await ui.pressButton('Avisar a la mesa');
+    await ui.aceptarAlerta('Avisar a la mesa');
+    assert.notEqual(ui.button('Avisar a la mesa').props.disabled, true);
+    await ui.escribir('Nombre', 'Rosa');
+    await ui.pressButton('Avisar a la mesa');
+    await ui.aceptarAlerta('Avisar a la mesa');
+    assert.deepEqual(ui.eventos, [['avisado', '2026-000191']]);
+  } finally { await ui.close(); }
+});
+
+test('Puerta/Cierre (Atrás): avisan al padre lo cargado sin mandar; la autoconsulta de legajos no cuenta', async () => {
+  const cambios = [];
+  const puerta = await montarPuerta(() => response(201, AVISO), {props: {onCambios: v => cambios.push(v)}});
+  try {
+    assert.equal(cambios.at(-1), false, 'abrir no es haber cargado algo');
+    await puerta.llenar();
+    assert.equal(cambios.at(-1), true);
+  } finally { await puerta.close(); }
+  const deCierre = [];
+  const cierre = await montarCierre(rutasCierre(() => response(200, {})), {props: {onCambios: v => deCierre.push(v)}});
+  try {
+    assert.equal(deCierre.at(-1), false);
+    await cierre.escribir('Aula o dormitorio', 'Aula 3');
+    assert.equal(deCierre.at(-1), true);
+    await cierre.escribir('Aula o dormitorio', '');
+    assert.equal(deCierre.at(-1), false);
+  } finally { await cierre.close(); }
+});
+
+test('EmergenciaApp (Atrás): el hook se activa fuera del inicio; frena mientras se manda y pide confirmar en puerta, ficha y cierre', async () => {
+  const ui = await montarApp();
+  const busqueda = {resultado: 'SIN_DERIVACION', dni: '30111222', plazas_libres: 4, mensaje: 'No hay derivación.'};
+  const confirmar = async (texto) => {
+    const alerta = ui.alerts.at(-1);
+    assert.equal(alerta[0], '¿Salir sin enviar?');
+    assert.equal(alerta[2].map(o => o.text).join('|'), 'Seguir cargando|Salir');
+    assert.equal(alerta[2][0].style, 'cancel');
+    return alerta;
+  };
+  try {
+    assert.equal(ui.pantallas.atras.activo, false, 'en el inicio Atrás es del sistema');
+    await ui.alBuscar();
+    assert.equal(ui.pantallas.atras.activo, true);
+
+    // Puerta.
+    await ui.hacer(() => ui.pantallas.buscar.onSinDerivacion('avisar', busqueda));
+    assert.equal(ui.vista(), 'puerta');
+    await ui.hacer(() => ui.pantallas.puerta.onEnviando(true));
+    await ui.hacer(() => ui.pantallas.atras.alAtras());
+    assert.equal(ui.toasts.at(-1).message, 'Se está enviando. Esperá un momento.');
+    assert.equal(ui.vista(), 'puerta');
+    await ui.hacer(() => ui.pantallas.puerta.onEnviando(false));
+    await ui.hacer(() => ui.pantallas.puerta.onCambios(true));
+    const antesPuerta = ui.alerts.length;
+    await ui.hacer(() => ui.pantallas.atras.alAtras());
+    const alertaPuerta = await confirmar();
+    assert.equal(ui.alerts.length, antesPuerta + 1);
+    assert.equal(ui.vista(), 'puerta', 'pregunta antes de salir');
+    await ui.hacer(() => ui.pantallas.puerta.onEnviando(true));
+    await ui.hacer(() => alertaPuerta[2][1].onPress());
+    assert.equal(ui.vista(), 'puerta', 'el envío arrancó con el diálogo abierto: «Salir» no sale');
+    await ui.hacer(() => ui.pantallas.puerta.onEnviando(false));
+    await ui.hacer(() => ui.pantallas.atras.alAtras());
+    await ui.hacer(() => ui.alerts.at(-1)[2][1].onPress());
+    assert.equal(ui.vista(), 'buscar');
+
+    // Una pantalla nueva no hereda lo cargado de la anterior.
+    await ui.hacer(() => ui.pantallas.buscar.onSinDerivacion('avisar', busqueda));
+    const antes = ui.alerts.length;
+    await ui.hacer(() => ui.pantallas.atras.alAtras());
+    assert.equal(ui.alerts.length, antes);
+    assert.equal(ui.vista(), 'buscar');
+
+    // Cierre.
+    await ui.hacer(() => ui.pantallas.buscar.onIntegrantes(CASO, '30111222'));
+    await ui.hacer(() => ui.pantallas.integrantes.onCerrar('alojar', {caso: CASO, confirmadas: 3, total_declarado: 3, integrantes: CONFIRMADAS}));
+    assert.equal(ui.vista(), 'cierre');
+    await ui.hacer(() => ui.pantallas.cierre.onCambios(true));
+    await ui.hacer(() => ui.pantallas.atras.alAtras());
+    await confirmar();
+    assert.equal(ui.vista(), 'cierre');
+    await ui.hacer(() => ui.alerts.at(-1)[2][1].onPress());
+    assert.equal(ui.vista(), 'integrantes');
+
+    // Ficha.
+    await ui.hacer(() => ui.pantallas.integrantes.onAbrirPersona({n: 2}, CASO, FILAS_FAMILIA));
+    assert.equal(ui.vista(), 'ficha');
+    assert.deepEqual(ui.pantallas.ficha.integrantes.map(i => i.n), [1, 2], 'la familia viaja a la ficha para el selector del adulto');
+    await ui.hacer(() => ui.pantallas.ficha.onCambios(true));
+    await ui.hacer(() => ui.pantallas.atras.alAtras());
+    await confirmar();
+    assert.equal(ui.vista(), 'ficha');
+    await ui.hacer(() => ui.alerts.at(-1)[2][1].onPress());
+    assert.equal(ui.vista(), 'integrantes');
+    await ui.hacer(() => ui.pantallas.integrantes.onAbrirPersona({n: 2}, CASO));
+    assert.equal(ui.pantallas.ficha.integrantes.length, 0, 'sin lista (otro llamador) la ficha cae al texto libre');
+    // Sin cambios: directo.
+    const antesFicha = ui.alerts.length;
+    await ui.hacer(() => ui.pantallas.atras.alAtras());
+    assert.equal(ui.alerts.length, antesFicha);
+    assert.equal(ui.vista(), 'integrantes');
+  } finally { await ui.close(); }
+});
+
+const FILAS_FAMILIA = [{n: 1, es_adulto: true}, {n: 2, es_adulto: false}];
