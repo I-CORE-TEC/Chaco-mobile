@@ -304,7 +304,7 @@ export default function EmergenciaPuertaScreen({
         if (plazas?.length) {
           // 400 `plazas`: se ocuparon las camas. Queda «Avisar a la mesa» con lo cargado.
           setSinCamas(true);
-          setAccion('avisar');
+          if (puedeAvisarALaMesa !== false) setAccion('avisar');
         }
         const generalesYPlazas = [...(plazas || []), ...(generales || [])];
         if (generalesYPlazas.length) setFalla({ tipo: 'rechazo', mensaje: generalesYPlazas.join('\n') });

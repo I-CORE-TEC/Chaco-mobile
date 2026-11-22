@@ -345,7 +345,7 @@ test('Cierre: la respuesta que llega después de salir llega igual al padre y no
 
 // ---- Sin derivación ----
 
-async function montarPuerta(rutas, {plazasLibres = 2, accion = 'ingresar', online = true, env: previo, consulta} = {}) {
+async function montarPuerta(rutas, {plazasLibres = 2, accion = 'ingresar', online = true, env: previo, consulta, props = {}} = {}) {
   const env = previo || await entorno(rutas);
   if (consulta) env.setConsulta(consulta);
   env.runtime.setOnline(online);
@@ -356,7 +356,7 @@ async function montarPuerta(rutas, {plazasLibres = 2, accion = 'ingresar', onlin
     mensaje: 'No hay una derivación para este DNI en tu dispositivo.',
     onIngresado: (c, r) => eventos.push(['ingresado', c?.id, r.reservadas]), onAvisado: r => eventos.push(['avisado', r.caso?.numero]),
     onNoEncontrado: () => eventos.push(['no_encontrado']), onSinModulo: m => eventos.push(['sin_modulo', m]),
-    onEnviando: v => enviando.push(v)});
+    onEnviando: v => enviando.push(v), ...props});
   await renderer.act(async () => { await esperar(10); });
   const llenar = async () => {
     await ui.press('Traslado: Policía');
@@ -464,6 +464,27 @@ test('Puerta: 400 `plazas` (las camas se ocuparon) pasa a «Avisar a la mesa» c
     const uuids = posts(ui.calls).map(c => c.body.uuid_cliente);
     assert.equal(new Set(uuids).size, 3, 'cada 400 olvida el uuid: no se creó nada');
   } finally { await ui.close(); }
+});
+
+test('Puerta: las banderas del back ocultan «Ingresar igual» o «Avisar a la mesa»; un 400 `plazas` sin permiso de avisar no cambia de acción', async () => {
+  const sinIngresar = await montarPuerta(() => response(201, AVISO), {props: {puedeIngresarIgual: false, puedeAvisarALaMesa: true}});
+  try {
+    assert.deepEqual(sinIngresar.titulos(), ['Avisar a la mesa'], 'con camas, pero sin alcance para ingresar');
+  } finally { await sinIngresar.close(); }
+  const sinAvisar = await montarPuerta(() => response(201, AVISO), {props: {puedeIngresarIgual: true, puedeAvisarALaMesa: false}});
+  try {
+    assert.deepEqual(sinAvisar.titulos(), ['Ingresar igual']);
+  } finally { await sinAvisar.close(); }
+  const plazas = await montarPuerta(() => response(400, {code: 'VALIDACION', detail: 'No hay camas libres.', plazas: ['No hay camas libres para ingresar a la familia.']}),
+    {props: {puedeIngresarIgual: true, puedeAvisarALaMesa: false}});
+  try {
+    await plazas.llenar();
+    await plazas.pressButton('Ingresar igual');
+    await plazas.aceptarAlerta('Ingresar igual');
+    assert.ok(plazas.labels().includes('No hay camas libres para ingresar a la familia.'), 'se muestra el mensaje del back');
+    assert.ok(!plazas.titulos().includes('Avisar a la mesa'), 'no se ofrece avisar sin permiso');
+    assert.equal(plazas.titulos()[0], 'Ingresar igual', 'no pasa a «Avisar a la mesa»');
+  } finally { await plazas.close(); }
 });
 
 test('Puerta: un corte deja el envío guardado; al volver a la familia solo se ofrece reintentar ESE, con lo cargado fijo y el MISMO uuid', async () => {

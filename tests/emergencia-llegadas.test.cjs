@@ -476,6 +476,13 @@ test('quitar persona: 400 orden muestra el mensaje del back; 404 y 409 se clasif
   assert.equal((await clasificacion(l.quitarPersona(sesion, 184, {n: 8, id: 318}))).tipo, 'conflicto');
 });
 
+test('quitar persona: el 400 real del back (code VALIDACION + clave orden) muestra el mensaje de orden', async () => {
+  const {r, l, sesion} = await preparar();
+  router(r, () => response(400, {code: 'VALIDACION', detail: 'Solo se puede quitar.', orden: ['Solo se puede quitar a quien se agregó en la puerta y todavía no ingresó.']}));
+  igual(await clasificacion(l.quitarPersona(sesion, 184, {n: 1, id: 311})).then(c => [c.tipo, c.mensaje]),
+    ['rechazo', 'Solo se puede quitar a quien se agregó en la puerta y todavía no ingresó.']);
+});
+
 test('búsqueda: puede_ingresar_igual y puede_avisar_a_la_mesa deciden los botones; sin ellas (back anterior) todo como antes', async () => {
   const {l} = await preparar();
   const sin = l.normalizarBusqueda({...BUSQUEDA, resultado: 'SIN_DERIVACION', derivacion: null});

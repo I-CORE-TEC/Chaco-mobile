@@ -484,28 +484,49 @@ test('Formulario 1: las respuestas de sugerencias fuera de orden se descartan, y
   } finally { await ui.close(); }
 });
 
-test('Formulario 1: el 429 con Retry-After mayor a un minuto pausa lo que pidió el servidor', async () => {
+test('Formulario 1: el 429 con Retry-After de 120 s sigue en pausa pasados 90 s', async () => {
+  const realNow = Date.now;
+  let corrimiento = 0;
+  Date.now = () => realNow() + corrimiento;
   const ui = await montarFormulario({sugerir: () => { throw Object.assign(new Error('x'), {status: 429, retryAfter: 120000}); }});
   try {
     await ui.escribir('DNI del responsable', '49103');
     await esperar(600);
     assert.equal(ui.sugeridos.length, 1);
+    corrimiento = 90000;
     await ui.escribir('DNI del responsable', '491037');
     await esperar(600);
-    assert.equal(ui.sugeridos.length, 1, 'en pausa');
+    assert.equal(ui.sugeridos.length, 1, 'a los 90 s sigue en pausa (pidió 120 s)');
+    corrimiento = 130000;
+    await ui.escribir('DNI del responsable', '4910378');
+    await esperar(600);
+    assert.equal(ui.sugeridos.length, 2, 'pasados 120 s vuelve a pedir');
+  } finally { Date.now = realNow; await ui.close(); }
+});
+
+test('Formulario 1: no pide sugerencias mientras se consulta un DNI de 7 dígitos', async () => {
+  const ui = await montarFormulario({sugerir: () => ({resultados: [], hay_mas: true}), consultar: () => new Promise(() => {})});
+  try {
+    await ui.escribir('DNI del responsable', '3011122');
+    // La consulta no termina: no se espera su promesa.
+    await renderer.act(async () => { ui.tree.root.findAllByType('CustomButton').find(b => b.props.title === 'Buscar persona').props.onPress(); await esperar(5); });
+    await esperar(600);
+    assert.deepEqual(ui.sugeridos, [], 'la consulta en curso frena el pedido que ya estaba programado');
   } finally { await ui.close(); }
 });
 
-test('Formulario 1: no pide sugerencias mientras se consulta el DNI ni tras el no_en_legajo (pidiendo el sexo)', async () => {
-  const ui = await montarFormulario({sugerir: () => ({resultados: [], hay_mas: true})});
+test('Formulario 1: filtrando en el cliente, más de 5 coincidencias sigue avisando «Hay más coincidencias»', async () => {
+  const resultados = [0, 1, 2, 3, 4, 5, 6].map(i => ({apellido: `Ap${i}`, nombre: 'N', dni: `4910000${i}`}));
+  const ui = await montarFormulario({sugerir: () => ({resultados, hay_mas: false})});
   try {
-    await ui.escribir('DNI del responsable', '30111222');
+    await ui.escribir('DNI del responsable', '49100');
     await esperar(600);
-    assert.deepEqual(ui.sugeridos, [], 'con 8 dígitos no se sugiere');
-    await ui.pressButton('Buscar persona');
-    assert.ok(ui.labels().some(l => l.startsWith('No figura en los legajos de DATAÑACH')));
+    await renderer.act(async () => { await esperar(); });
+    assert.ok(ui.labels().includes('Hay más coincidencias: seguí escribiendo.'));
+    await ui.escribir('DNI del responsable', '491000');
     await esperar(600);
-    assert.deepEqual(ui.sugeridos, [], 'tras el no_en_legajo no hay pedido de más');
+    assert.deepEqual(ui.sugeridos, ['49100'], 'filtró acá, sin pedir');
+    assert.ok(ui.labels().includes('Hay más coincidencias: seguí escribiendo.'), 'el filtro local mantiene el aviso');
   } finally { await ui.close(); }
 });
 

@@ -235,7 +235,16 @@ export default function EmergenciaIntegrantesScreen({
     try {
       const r = await quitarPersona(sesionRef.current, casoId, integrante);
       if (!montado.current) return;
-      if (!r.ya_estaba_quitada) showToast({ type: 'success', message: `Se quitó la persona ${r.n} de la familia.` });
+      if (!r.ya_estaba_quitada) {
+        showToast({ type: 'success', message: `Se quitó la persona ${r.n} de la familia.` });
+        // Un «Agregar» en duda ya no corresponde: reintentarlo volvería a sumar a la persona recién quitada.
+        olvidarAgregarPendiente(sesionRef.current, casoId).catch(() => {});
+        setReintentoAgregar(false);
+      }
+      // La fila sale ya: si la recarga falla, la pantalla no queda mostrando a quien se quitó.
+      setDatos((prev) => (prev ? {
+        ...prev, integrantes: prev.integrantes.filter((i) => i.id !== integrante.id), total_declarado: r.total_declarado,
+      } : prev));
       await cargar();
     } catch (e) {
       const c = e?.clasificacion || clasificarErrorLlegada(e);

@@ -806,6 +806,42 @@ test('Integrantes: quitar con ya_estaba_quitada es éxito silencioso; 400 y 409 
   } finally { await lectura.close(); }
 });
 
+test('Integrantes: quitar tras un «Agregar» en duda olvida el pendiente: «Reintentar agregar» ya no aparece ni suma de nuevo', async () => {
+  let quitada = false;
+  const ui = await montarIntegrantes((call) => {
+    if (call.method === 'POST' && call.url.endsWith('/quitar/')) { quitada = true; return response(200, {n: 3, total_declarado: 2, ya_estaba_quitada: false}); }
+    if (call.method === 'POST') return fallaDeRed();
+    return response(200, {...INTEGRANTES, integrantes: quitada ? [CONFIRMADA, FILA(2, {id: 312})] : [CONFIRMADA, FILA(2, {id: 312}), FILA(3, {id: 313, puede_quitarse: true})], total_declarado: quitada ? 2 : 3});
+  });
+  try {
+    await ui.pressButton('Agregar persona');
+    await ui.aceptarAlerta('Agregar');
+    assert.ok(ui.button('Reintentar agregar persona'), 'el alta quedó en duda');
+    await ui.pressButton('Quitar persona');
+    await ui.aceptarAlerta('Quitar');
+    assert.ok(!ui.button('Reintentar agregar persona'), 'quitar descarta el alta en duda');
+    assert.ok(ui.button('Agregar persona'));
+    assert.equal(await ui.llegadas.agregarPendiente(await ui.llegadas.abrirSesion(), 184), null);
+  } finally { await ui.close(); }
+});
+
+test('Integrantes: tras quitar, la fila sale en el momento aunque la recarga falle', async () => {
+  let quitada = false;
+  const ui = await montarIntegrantes((call) => {
+    if (call.method === 'POST') { quitada = true; return response(200, {n: 3, total_declarado: 2, ya_estaba_quitada: false}); }
+    if (quitada) return fallaDeRed();
+    return response(200, {...INTEGRANTES, integrantes: [CONFIRMADA, FILA(2, {id: 312}), FILA(3, {id: 313, puede_quitarse: true})], total_declarado: 3});
+  });
+  try {
+    assert.ok(ui.labels().includes('3. Persona 3'));
+    await ui.pressButton('Quitar persona');
+    await ui.aceptarAlerta('Quitar');
+    assert.ok(!ui.labels().includes('3. Persona 3'), 'la fila quitada ya no se muestra');
+    assert.ok(ui.labels().includes('1 de 2 confirmadas'), 'el total baja con la respuesta');
+    assert.ok(!ui.button('Quitar persona'));
+  } finally { await ui.close(); }
+});
+
 // ---- EmergenciaApp: el recorrido y el router por estado_actual ----
 
 async function montarApp({integrantes = null, ficha = null} = {}) {

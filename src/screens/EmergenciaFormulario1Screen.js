@@ -267,7 +267,7 @@ export default function EmergenciaFormulario1Screen({ uuid = null, onTerminar })
     const locales = sugerenciasDesdeLaPrevia(sugerenciasPrevias.current, dniTecleado);
     if (locales) {
       setSugerencias(locales.slice(0, 5));
-      setHayMasSugerencias(false);
+      setHayMasSugerencias(locales.length > 5);
       return undefined;
     }
     const timer = setTimeout(async () => {
