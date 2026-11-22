@@ -120,3 +120,10 @@ test('cada módulo declara sus entradas: ninguno usa ya el panel lateral ni un b
   }
   assert.ok(!fs.existsSync(path.join(root, 'src/components/SettingsPanel.js')));
 });
+
+test('Becas: el Atrás de Android y del navegador vuelve a Inicio desde otra pestaña, salvo con el detalle de un relevamiento abierto', () => {
+  const fuente = fs.readFileSync(path.join(root, 'src/navigation/BecasApp.js'), 'utf8');
+  assert.ok(/import useBotonAtras from '\.\.\/hooks\/useBotonAtras'/.test(fuente), 'importa el hook');
+  assert.ok(/useBotonAtras\(\{\s*activo: activeTab !== 'Inicio' && !selectedRelevamientoId,\s*alAtras: \(\) => handleTabPress\('Inicio'\)\s*\}\)/.test(fuente),
+    'activo fuera de Inicio y sin detalle; Atrás vuelve a Inicio');
+});

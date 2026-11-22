@@ -9,6 +9,7 @@ import HomeScreen from '../screens/HomeScreen';
 import Banner from '../components/Banner';
 import BottomNav from '../components/BottomNav';
 import AvisosBandeja from '../components/AvisosBandeja';
+import useBotonAtras from '../hooks/useBotonAtras';
 import useAvisos from '../hooks/useAvisos';
 import PageTransition from '../components/PageTransition';
 import RelevamientosScreen from '../screens/RelevamientosScreen';
@@ -123,6 +124,9 @@ export default function BecasApp({ onCambiarModulo }) {
     if (tab === activeTab) return;
     setActiveTab(tab);
   };
+
+  // Atrás de Android y del navegador: desde Cuenta o Relevamientos vuelve a Inicio; con el detalle abierto no cambia.
+  useBotonAtras({ activo: activeTab !== 'Inicio' && !selectedRelevamientoId, alAtras: () => handleTabPress('Inicio') });
 
   const renderScreen = () => {
     switch (activeTab) {

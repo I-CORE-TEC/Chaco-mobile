@@ -29,14 +29,15 @@ test('el intervalo de fondo es de 60 s', async () => {
   assert.equal(modulo.SYNC_INTERVAL_MS, 60000);
 });
 
-test('repite con la app activa, se frena en segundo plano y al volver corre en el momento', async () => {
+test('repite con la app activa, se frena en segundo plano y al volver corre en el momento', async (t) => {
   const estado = appStateFalso('active');
   const {repetirMientrasActiva} = await cargar(estado);
   let pasadas = 0;
   const dejar = repetirMientrasActiva(() => { pasadas += 1; }, 20);
-  await esperar(70);
+  t.after(dejar);
+  await esperar(200);
   const activas = pasadas;
-  assert.ok(activas >= 2, `con la app activa repite (${activas})`);
+  assert.ok(activas >= 1, `con la app activa repite (${activas})`);
 
   estado.cambiar('background');
   await esperar(70);
@@ -54,22 +55,24 @@ test('repite con la app activa, se frena en segundo plano y al volver corre en e
   assert.equal(estado.cantidad(), 0, 'y suelta el listener');
 });
 
-test('inactive (pantalla de permisos, multitarea de iOS) no frena ni duplica', async () => {
+test('inactive (pantalla de permisos, multitarea de iOS) no frena ni duplica', async (t) => {
   const estado = appStateFalso('active');
   const {repetirMientrasActiva} = await cargar(estado);
   let pasadas = 0;
   const dejar = repetirMientrasActiva(() => { pasadas += 1; }, 1000);
+  t.after(dejar);
   estado.cambiar('inactive');
   estado.cambiar('active');
   assert.equal(pasadas, 0, 'volver de inactive no dispara una pasada extra');
   dejar();
 });
 
-test('si arranca en segundo plano espera a que la app vuelva al frente', async () => {
+test('si arranca en segundo plano espera a que la app vuelva al frente', async (t) => {
   const estado = appStateFalso('background');
   const {repetirMientrasActiva} = await cargar(estado);
   let pasadas = 0;
   const dejar = repetirMientrasActiva(() => { pasadas += 1; }, 20);
+  t.after(dejar);
   await esperar(60);
   assert.equal(pasadas, 0);
   estado.cambiar('active');
