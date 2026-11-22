@@ -7,6 +7,7 @@ import FechaInput from '../components/FechaInput';
 import CustomButton from '../components/CustomButton';
 import CameraModal from '../components/CameraModal';
 import InterruptorSiNo from '../components/InterruptorSiNo';
+import IdentidadEnConflicto from '../components/IdentidadEnConflicto';
 import { useTheme } from '../context/ThemeContext';
 import { useToast } from '../context/ToastContext';
 import * as ImagePicker from '../services/imagePicker';
@@ -24,7 +25,7 @@ import {
 import {
   ASISTENCIA, AVISOS, CANTIDADES, FOTOS, MAX_DIRECCION, MAX_TRASLADO_OTRO, SEXOS, TRASLADOS,
   aCantidad, asistenciaVisible, filtrarLocalidades, hayErrores, listaDeErrores, mismaIdentidad, personaConfirmada, textoDeCode,
-  textoDeOcultos, topesAsistencia, totalDeclarado, validarCaso, validarConsulta,
+  personaEnConflicto, resolverIdentidad, sinRespuestaDeIdentidad, textoDeOcultos, topesAsistencia, totalDeclarado, validarCaso, validarConsulta,
 } from '../utils/emergencia';
 import { statusTones } from '../theme/statusBadges';
 import { keyboardDismissModeFor } from '../utils/teclado';
@@ -144,16 +145,21 @@ export default function EmergenciaFormulario1Screen({ uuid = null, onTerminar })
       // Lo que confirmó un legajo es del DNI: completar el sexo a mano (legajo sin sexo) no lo invalida.
       const campos = prev.consulta?.origen === 'legajo' ? ['dni'] : CAMPOS_IDENTIDAD;
       if (campos.some((campo) => campo in cambios && cambios[campo] !== prev[campo])) next.consulta = null;
-      return next;
+      // Otro DNI (o cambiar el nombre tras «es esa persona») deja sin efecto lo respondido sobre la identidad.
+      const cambioElDni = 'dni' in cambios && cambios.dni !== prev.dni;
+      const cambioElNombre = prev.es_misma_persona === true && ('nombre' in cambios || 'apellido' in cambios);
+      return cambioElDni || cambioElNombre ? sinRespuestaDeIdentidad(next) : next;
     });
     setErroresServidor((prev) => {
       const claves = Object.keys(cambios);
-      if (!claves.some((clave) => prev[clave] || (clave in cantidadesYTotal && prev.total))) return prev;
+      const otroDni = claves.includes('dni') && prev.persona_registrada;
+      if (!otroDni && !claves.some((clave) => prev[clave] || (clave in cantidadesYTotal && prev.total))) return prev;
       const next = { ...prev };
       claves.forEach((clave) => {
         delete next[clave];
         if (clave in cantidadesYTotal) delete next.total;
       });
+      if (otroDni) delete next.persona_registrada;
       return next;
     });
     if (CAMPOS_IDENTIDAD.some((campo) => campo in cambios)) setAvisoConsulta(null);
@@ -434,9 +440,10 @@ export default function EmergenciaFormulario1Screen({ uuid = null, onTerminar })
   };
 
   // ---- Envío ----
-  const enviar = async () => {
+  const enviar = () => enviarDatos(datos);
+  const enviarDatos = async (aEnviar) => {
     if (enviandoRef.current) return;
-    const locales = validarCaso(datos);
+    const locales = validarCaso(aEnviar);
     setIntentado(true);
     if (hayErrores(locales)) {
       const cantidad = Object.keys(locales).length;
@@ -446,8 +453,8 @@ export default function EmergenciaFormulario1Screen({ uuid = null, onTerminar })
     enviandoRef.current = true;
     setEnviando(true);
     try {
-      await guardarBorrador(uuidCliente, datos);
-      const resultado = await encolarCaso(uuidCliente, { datos, relevadoEn: new Date() });
+      await guardarBorrador(uuidCliente, aEnviar);
+      const resultado = await encolarCaso(uuidCliente, { datos: aEnviar, relevadoEn: new Date() });
       const envio = resultado?.envio;
       if (envio?.estado === 'corregir') {
         // El servidor ya contestó 400: el borrador volvió con los errores, se corrige acá mismo.
@@ -473,6 +480,24 @@ export default function EmergenciaFormulario1Screen({ uuid = null, onTerminar })
       enviandoRef.current = false;
       if (montado.current) setEnviando(false);
     }
+  };
+
+  // Respuesta al 400 `persona_registrada`: se aplica sobre los datos y se manda de nuevo en el mismo toque.
+  const decidirIdentidad = (opcion) => {
+    const nuevos = resolverIdentidad(datos, opcion, personaEnConflicto(erroresServidor));
+    setDatos(nuevos);
+    setErroresServidor((prev) => {
+      const { persona_registrada: _p, dni: _d, ...resto } = prev;
+      return resto;
+    });
+    enviarDatos(nuevos);
+  };
+  const corregirDni = () => {
+    setErroresServidor((prev) => {
+      const { persona_registrada: _p, ...resto } = prev;
+      return resto;
+    });
+    showToast({ type: 'info', message: 'Corregí el DNI y volvé a enviar.' });
   };
 
   const confirmarDescarte = () => showAlert('Descartar relevamiento', 'Se borra lo cargado de esta familia, con sus fotos. No se puede deshacer.', [
@@ -603,6 +628,10 @@ export default function EmergenciaFormulario1Screen({ uuid = null, onTerminar })
           <CustomButton title="Escanear DNI" variant="secondary" iconLeft="scan-outline" onPress={abrirScanner} />
         </View>
         {errorCampo(['dni'])}
+        {personaEnConflicto(erroresServidor) ? (
+          <IdentidadEnConflicto persona={personaEnConflicto(erroresServidor)} deshabilitado={enviando}
+            onMisma={() => decidirIdentidad('misma')} onOtra={() => decidirIdentidad('otra')} onCorregir={corregirDni} />
+        ) : null}
         {sugerencias.map((sugerida) => (
           <Pressable key={String(sugerida.dni)} accessibilityRole="button"
             accessibilityLabel={`Elegir a ${sugerida.apellido}, ${sugerida.nombre}, DNI ${formatDni(sugerida.dni)}`}
@@ -641,6 +670,7 @@ export default function EmergenciaFormulario1Screen({ uuid = null, onTerminar })
         <Text style={etiqueta}>Teléfono de contacto</Text>
         <TextInput value={datos.telefono} onChangeText={(texto) => cambiar({ telefono: texto })} keyboardType="phone-pad"
           accessibilityLabel="Teléfono de contacto" placeholderTextColor={theme.colors.textSoft} style={caja(['telefono'])} />
+        {errorCampo(['telefono'])}
         {casilla({ clave: 'documento_extraviado', titulo: 'Perdió el documento (sabe el número)' })}
       </View>
 

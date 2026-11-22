@@ -97,7 +97,7 @@ test('ficha: el mínimo bloquea lo que el back exige siempre; nombre, apellido, 
   assert.equal(f.validarConfirmacion({}, {hoy: HOY}).embarazo[0], 'Falta: avisos de salud · respondé sí o no a embarazo.');
 });
 
-test('ficha: completar valida tipos y el adulto de un menor; solo cambian las secciones tocadas; las que faltan', async () => {
+test('ficha: completar valida tipos y el adulto de un menor (como el back, que revalida el mínimo con lo guardado); solo cambian las secciones tocadas; las que faltan', async () => {
   const {f} = await preparar();
   const guardada = {version: 1, ...f.fichaDesdePlano({...MINIMO, fecha_nacimiento: '10/03/2012', adulto_responsable: 'Rosa',
     escuela: 'N.° 12', trabajo_sin_datos: true})};
@@ -107,6 +107,10 @@ test('ficha: completar valida tipos y el adulto de un menor; solo cambian las se
   igual(f.seccionesCambiadas({...plano, escuela: 'N.° 12 '}, guardada), [], 'los espacios no son un cambio');
   igual(f.seccionesCambiadas({...plano, obra_social: 'PAMI', vacunacion_sin_datos: true}, guardada), ['vacunacion', 'salud']);
   igual(Object.keys(f.validarCompletar({...plano, adulto_responsable: ''}, {hoy: HOY})), ['adulto_responsable']);
+  igual(f.validarCompletar({...plano, obra_social: 'PAMI'}, {hoy: HOY}), {}, 'M3: con el adulto ya guardado, guardar otra sección no se frena');
+  igual(Object.keys(f.validarConfirmacion({...MINIMO, fecha_nacimiento: '10/03/2012', adulto_responsable: ''}, {hoy: HOY, plazaId: 1})), ['adulto_responsable'], 'al confirmar también');
+  igual(Object.keys(f.validarConfirmacion({...MINIMO, telefono: '123'}, {hoy: HOY, plazaId: 1})), ['telefono'], 'M2: teléfono de 8 a 15 dígitos');
+  igual(f.validarConfirmacion({...MINIMO, telefono: '+54 (362) 400-0000'}, {hoy: HOY, plazaId: 1}), {});
   igual(Object.keys(f.validarCompletar({...plano, ocupacion: 'x'.repeat(201)}, {hoy: HOY})), ['ocupacion']);
   igual(f.validarCompletar(plano, {hoy: HOY}), {});
 });

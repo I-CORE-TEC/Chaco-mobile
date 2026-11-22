@@ -249,8 +249,9 @@ export default function EmergenciaRecibirEntregaScreen({ entrega, dispositivoId 
       }
       setFalla(c);
       if (c.espera) {
-        setAhora(Date.now());
-        setEsperaHasta(Date.now() + c.espera);
+        const t = Date.now();
+        setAhora(t);
+        setEsperaHasta(t + c.espera);
       }
     } finally {
       enviandoRef.current = false;

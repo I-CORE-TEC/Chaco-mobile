@@ -41,8 +41,11 @@ function loadScreen(relative, mocks, extra = {}) {
   const context = vm.createContext({console, setTimeout, clearTimeout, Date, setInterval: () => 0, clearInterval: () => {}, ...extra});
   vm.runInContext('(function(require,module,exports){' + code + '\n})', context)(
     name => {
+      // Los componentes compartidos importan './CustomButton' (relativo a components/); la pantalla, '../components/CustomButton'.
+      if (name === './CustomButton') name = '../components/CustomButton';
       // El interruptor es un componente real y compartido: se carga con los mismos mocks que la pantalla.
       if (name === '../components/InterruptorSiNo' && !mocks[name]) mocks[name] = {__esModule: true, default: loadScreen('src/components/InterruptorSiNo.js', mocks)};
+      if (name === '../components/IdentidadEnConflicto' && !mocks[name]) mocks[name] = {__esModule: true, default: loadScreen('src/components/IdentidadEnConflicto.js', mocks)};
       assert.ok(mocks[name], 'Missing screen mock: ' + name);
       return mocks[name];
     }, module, module.exports);
@@ -430,6 +433,18 @@ test('Derivación: muestra caso, prioridad, responsable, camas, quién derivó, 
     assert.equal(fondoDe(ui.tree, 'Prioridad alta'), '#FEF0F2');
     assert.equal(api(ui.calls).length, 0, 'abrir no pide nada');
   } finally { await ui.close(); }
+});
+
+test('Derivación (M1): muestra el aviso «Identidad a revisar» solo cuando el back lo manda', async () => {
+  const con = await montarDerivacion(() => response(200, ACEPTACION), {busqueda: {...BUSQUEDA, derivacion: {...DERIVACION,
+    responsable: {...DERIVACION.responsable, identidad_a_revisar: {nombre: 'Pedro', apellido: 'Gómez'}}}}});
+  try {
+    assert.ok(con.labels().some(l => l.startsWith('Identidad a revisar:') && l.includes('Gómez, Pedro')));
+  } finally { await con.close(); }
+  const sin = await montarDerivacion(() => response(200, ACEPTACION));
+  try {
+    assert.ok(!sin.labels().some(l => l.startsWith('Identidad a revisar')));
+  } finally { await sin.close(); }
 });
 
 test('Derivación: «Aceptar» manda el POST con uuid y sigue a los integrantes; avisa al padre mientras manda', async () => {

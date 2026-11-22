@@ -99,6 +99,11 @@ test('validarRecepcion: una cantidad por línea y la foto del remito', async () 
   igual(k.validarRecepcion({entrega, cantidades: {12: '1', 14: '1'}, remito: {file: {}}}), {}, 'en web vale el File');
 });
 
+test('400 con persona_registrada objeto: no rompe y no va a generales', async () => {
+  const {k} = await preparar();
+  igual(k.erroresDeRecepcion({remito: ['Falta.'], persona_registrada: {apellido: 'F', nombre: 'J'}}), {remito: ['Falta.']});
+});
+
 test('400 VALIDACION: errores por línea, por campo y generales', async () => {
   const {k} = await preparar();
   igual(k.erroresDeRecepcion({cantidades: ['Falta la cantidad de Colchón.'], remito: ['Falta la foto del remito.'],
