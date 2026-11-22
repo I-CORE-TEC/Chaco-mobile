@@ -99,6 +99,20 @@ const NECESIDADES = {
   mascotas: 'Mascotas',
 };
 
+// `identidad_a_revisar` (Cambio 486): { nombre, apellido } tal como los cargó quien relevó cuando el DNI ya
+// era de otra persona, mientras la mesa no lo revisó; null si no hay (o con un back anterior).
+export const normalizarIdentidadARevisar = (valor) => {
+  if (!valor || typeof valor !== 'object' || Array.isArray(valor)) return null;
+  const nombre = textoPlano(valor.nombre).trim();
+  const apellido = textoPlano(valor.apellido).trim();
+  return nombre || apellido ? { nombre, apellido } : null;
+};
+
+export const textoIdentidadARevisar = (identidad) => {
+  const quien = [identidad?.apellido, identidad?.nombre].filter(Boolean).join(', ');
+  return `Identidad a revisar: el DNI ya figuraba con otra persona y quien relevó cargó ${quien || 'otros datos'}. No bloquea el ingreso; la mesa lo revisa.`;
+};
+
 const normalizarDerivacion = (derivacion) => {
   if (!derivacion || typeof derivacion !== 'object' || derivacion.id == null) return null;
   const responsable = derivacion.responsable && typeof derivacion.responsable === 'object' ? derivacion.responsable : {};
@@ -116,6 +130,7 @@ const normalizarDerivacion = (derivacion) => {
       nombre: textoPlano(responsable.nombre),
       apellido: textoPlano(responsable.apellido),
       dni: textoPlano(responsable.dni),
+      identidad_a_revisar: normalizarIdentidadARevisar(responsable.identidad_a_revisar),
     },
     grupo: Object.fromEntries([...GRUPO, ...ASISTENCIA].map(([clave]) => [clave, entero(grupo[clave])])),
     necesidades: (Array.isArray(derivacion.necesidades) ? derivacion.necesidades : []).filter((n) => typeof n === 'string'),
@@ -213,6 +228,7 @@ const normalizarIntegrante = (fila) => {
     // Cambios 539 y 537 (aditivas): la clave de la fila y si «Quitar persona» corresponde.
     id: fila.id ?? null,
     puede_quitarse: fila.puede_quitarse === true,
+    identidad_a_revisar: normalizarIdentidadARevisar(fila.identidad_a_revisar),
   };
 };
 
@@ -304,7 +320,7 @@ export const erroresDeLlegada = (payload, campos = []) => {
   const errores = {};
   Object.entries(erroresDelServidor(payload)).forEach(([clave, mensajes]) => {
     if (campos.includes(clave)) errores[clave] = mensajes;
-    else errores.generales = [...(errores.generales || []), ...mensajes];
+    else if (Array.isArray(mensajes)) errores.generales = [...(errores.generales || []), ...mensajes];
   });
   return errores;
 };
@@ -825,7 +841,6 @@ export const borrarBorradorFicha = async (sesion, casoId, n) => {
 
 export const MAX_AULA = 80;
 export const MAX_TARJETA = 40;
-export const MAX_ENCARGADO = 120;
 export const MAX_MOTIVO_CANCELAR = 200;
 
 // §13.9, en el orden del contrato (los rótulos son los del back, `MotivoDiferencia`).
@@ -856,12 +871,11 @@ const texto = (valor) => String(valor ?? '').trim();
 const agregarError = (errores, campo, mensaje) => { errores[campo] = [...(errores[campo] || []), mensaje]; };
 
 // Las mismas reglas que el servicio del back (emergencia_cierre): ayudan antes de mandar; el back decide.
-export const validarAlojar = ({ aula, tarjeta_entregada: entregada, tarjeta_numero: numero, encargado } = {}) => {
+export const validarAlojar = ({ aula, tarjeta_entregada: entregada, tarjeta_numero: numero } = {}) => {
   const errores = {};
   if (texto(aula).length > MAX_AULA) agregarError(errores, 'aula', largo(MAX_AULA));
   if (entregada === true && !texto(numero)) agregarError(errores, 'tarjeta_numero', FALTA_TARJETA);
   if (entregada === true && texto(numero).length > MAX_TARJETA) agregarError(errores, 'tarjeta_numero', largo(MAX_TARJETA));
-  if (texto(encargado).length > MAX_ENCARGADO) agregarError(errores, 'encargado', largo(MAX_ENCARGADO));
   return errores;
 };
 export const validarDiferencia = ({ motivo, observacion } = {}) => {
@@ -959,7 +973,7 @@ export const alojar = async (sesion, casoId, datos = {}, { incierto = false, der
   if (Object.keys(errores).length) throw crearErrorLocal(errores);
   const id = idDeDerivacion(derivacion);
   return cerrarIngreso(sesion, (op) => alojarFamilia(casoId, { ...datos, derivacion: id }, op), {
-    incierto, derivacion: id, campos: ['sector', 'aula', 'tarjeta_numero', 'encargado'], produce: ESTADOS_ALOJADA,
+    incierto, derivacion: id, campos: ['sector', 'aula', 'tarjeta_numero'], produce: ESTADOS_ALOJADA,
     textoIncierto: TEXTO_ALOJAR_INCIERTO, textoYaHecho: TEXTO_YA_ALOJADA, nota: NOTA_REVISAR_ALOJAMIENTO,
   });
 };
@@ -1083,7 +1097,8 @@ export const CAMPOS_FORMULARIO_PUERTA = [
   ...CANTIDADES.map((c) => c.clave), 'dependientes', 'mayores_dependientes', 'lactantes',
   'embarazo', 'electrodependiente', 'medicacion_critica', 'mascotas', 'direccion', 'localidad', 'observaciones', 'total',
 ];
-const CAMPOS_PUERTA_400 = [...CAMPOS_FORMULARIO_PUERTA, 'plazas'];
+// `persona_registrada` no es un campo: es la persona que ya tiene ese DNI (la pantalla pregunta «¿Es esa persona?»).
+export const CAMPOS_PUERTA_400 = [...CAMPOS_FORMULARIO_PUERTA, 'plazas', 'persona_registrada'];
 
 const clavePuerta = (owner) => `${PREFIJO_PUERTA}${owner}`;
 const clavePuertaUuid = (owner) => `${PREFIJO_PUERTA_UUID}${owner}`;

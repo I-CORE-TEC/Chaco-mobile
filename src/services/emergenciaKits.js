@@ -148,6 +148,7 @@ export const erroresDeRecepcion = (payload) => {
   const planos = erroresDelServidor(payload);
   const errores = {};
   Object.entries(planos).forEach(([clave, mensajes]) => {
+    if (!Array.isArray(mensajes)) return;
     const linea = clave.match(/^cantidades\[(.+)\]$/);
     if (linea) {
       errores.lineas = { ...(errores.lineas || {}), [linea[1]]: mensajes };

@@ -40,8 +40,11 @@ function loadScreen(relative, mocks, timers = {}) {
     setInterval: timers.setInterval || (() => 0), clearInterval: timers.clearInterval || (() => {}), ...(timers.globals || {})});
   vm.runInContext('(function(require,module,exports){' + code + '\n})', context)(
     name => {
+      // Los componentes compartidos importan './CustomButton' (relativo a components/); la pantalla, '../components/CustomButton'.
+      if (name === './CustomButton') name = '../components/CustomButton';
       // El interruptor es un componente real y compartido: se carga con los mismos mocks que la pantalla.
       if (name === '../components/InterruptorSiNo' && !mocks[name]) mocks[name] = {__esModule: true, default: loadScreen('src/components/InterruptorSiNo.js', mocks)};
+      if (name === '../components/IdentidadEnConflicto' && !mocks[name]) mocks[name] = {__esModule: true, default: loadScreen('src/components/IdentidadEnConflicto.js', mocks)};
       assert.ok(mocks[name], 'Missing screen mock: ' + name);
       return mocks[name];
     }, module, module.exports);
@@ -581,6 +584,47 @@ test('Formulario 1: si el envío inmediato vuelve con 400 se queda en la pantall
     assert.ok(ui.labels().includes('• DNI: DNI inválido.'));
     assert.equal(ui.toasts.at(-1).message, 'El servidor rechazó algunos datos. Corregí lo marcado y volvé a enviar.');
   } finally { await ui.close(); }
+});
+
+const titulos = (ui) => ui.tree.root.findAllByType('CustomButton').map(b => b.props.title);
+const PERSONA_REGISTRADA = {dni: ['Ese DNI ya está registrado como otra persona.'], persona_registrada: {apellido: 'FARIÑA', nombre: 'Joaquin'}};
+
+test('Formulario 1 (A3): el 400 persona_registrada, también al volver de la cola, abre la pregunta; «es esa persona» reenvía sin nombre; «es otra» con identidad_en_conflicto', async () => {
+  for (const [boton, nombre, conflicto] of [['Es esa persona', '', undefined], ['Es otra persona', 'Rosa', true]]) {
+    const ui = await montarFormulario({
+      borrador: {datos: COMPLETO, errores: PERSONA_REGISTRADA},
+      encolar: (uuid) => ({uuid_cliente: uuid, envio: {estado: 'enviado', resultado: {numero: '2026-000184'}}}),
+    });
+    try {
+      assert.ok(titulos(ui).includes('Es esa persona') && titulos(ui).includes('Es otra persona') && titulos(ui).includes('Corregir el DNI'));
+      assert.ok(ui.labels().includes('Ese DNI ya está registrado como FARIÑA, Joaquin. ¿Es esa persona?'));
+      assert.ok(!ui.labels().some(l => /persona_registrada/.test(l)), 'no se lista como error genérico');
+      await ui.pressButton(boton);
+      assert.equal(ui.cola.calls.encolados.length, 1, 'responder manda en el mismo toque');
+      const caso = ui.emergencia.datosDelCaso(ui.cola.calls.encolados[0][1].datos);
+      assert.deepEqual([caso.nombre, caso.identidad_en_conflicto], [nombre, conflicto]);
+      assert.equal(ui.terminados.length, 1);
+    } finally { await ui.close(); }
+  }
+});
+
+test('Formulario 1 (A3): «Corregir el DNI» no manda; cambiar el DNI borra la pregunta y la respuesta; (M2) el teléfono inválido no encola y se marca', async () => {
+  const ui = await montarFormulario({borrador: {datos: {...COMPLETO, telefono: '12'}, errores: PERSONA_REGISTRADA}});
+  try {
+    await ui.pressButton('Corregir el DNI');
+    assert.ok(!titulos(ui).includes('Es esa persona'));
+    assert.equal(ui.cola.calls.encolados.length, 0);
+    await ui.pressButton('Enviar');
+    assert.equal(ui.cola.calls.encolados.length, 0, 'teléfono de 2 dígitos');
+    assert.ok(ui.labels().includes('Ingresá un teléfono de 8 a 15 dígitos.'));
+  } finally { await ui.close(); }
+  const otro = await montarFormulario({borrador: {datos: {...COMPLETO, es_misma_persona: true, nombre: '', apellido: ''}, errores: PERSONA_REGISTRADA}});
+  try {
+    await otro.escribir('DNI del responsable', '30111223');
+    assert.ok(!titulos(otro).includes('Es esa persona'), 'otro DNI: la pregunta ya no vale');
+    await otro.pressButton('Enviar');
+    assert.equal(otro.cola.calls.encolados.length, 0, 'sin nombre ni apellido y sin la respuesta, no sale');
+  } finally { await otro.close(); }
 });
 
 test('Formulario 1: enviado al toque muestra el número; foto que no convierte avisa sin guardar', async () => {

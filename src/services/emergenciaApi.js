@@ -47,7 +47,7 @@ export const ORIGENES_IDENTIDAD = ['personas', 'legajo'];
 // los calcula el servidor): acá no se mandan.
 export const CAMPOS_CASO = [
   'uuid_cliente', 'relevado_en', 'traslado', 'traslado_otro', 'dni', 'nombre', 'apellido',
-  'fecha_nacimiento', 'telefono', 'documento_extraviado', 'responsable_aparte',
+  'fecha_nacimiento', 'telefono', 'documento_extraviado', 'identidad_en_conflicto', 'responsable_aparte',
   'menores_f', 'menores_m', 'adultos_f', 'adultos_m', 'mayores_f', 'mayores_m',
   'dependientes', 'mayores_dependientes', 'lactantes',
   'embarazo', 'electrodependiente', 'medicacion_critica', 'mascotas',
@@ -273,16 +273,15 @@ const conDerivacion = (body, derivacion) => {
   return body;
 };
 
-// §13.9 «Familia alojada» (N de N). Los cinco campos son opcionales; `tarjeta_numero` va con la tarjeta
-// entregada. NO es idempotente: el reintento de un envío que llegó da 409 ALOJADO (o CERRADO).
+// §13.9 «Familia alojada» (N de N). Los campos son opcionales; `tarjeta_numero` va con la tarjeta
+// entregada. Quién recibe es el usuario logueado: el back ya no lee `encargado`. NO es idempotente: el reintento de un envío que llegó da 409 ALOJADO (o CERRADO).
 export const alojarFamilia = (casoId, {
-  sector = null, aula = '', tarjeta_entregada = false, tarjeta_numero = '', encargado = '', derivacion = null,
+  sector = null, aula = '', tarjeta_entregada = false, tarjeta_numero = '', derivacion = null,
 } = {}, opciones = {}) => {
   const body = { tarjeta_entregada: tarjeta_entregada === true };
   if (presente(sector)) body.sector = Number(sector);
   if (presente(aula)) body.aula = String(aula).trim();
   if (body.tarjeta_entregada && presente(tarjeta_numero)) body.tarjeta_numero = String(tarjeta_numero).trim();
-  if (presente(encargado)) body.encargado = String(encargado).trim();
   conDerivacion(body, derivacion);
   return conVerificacion(() => pedirJson(RUTAS.alojar(casoId), { ...opciones, method: 'POST', body }));
 };

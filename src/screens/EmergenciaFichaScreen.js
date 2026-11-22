@@ -11,6 +11,7 @@ import {
   TEXTO_SIN_RED, abrirSesion, borrarBorradorFicha, camasElegibles, cargarCamas, cargarPersona, clasificarErrorLlegada,
   completarFicha, confirmarPendiente, confirmarPersona, escucharRed, estadoDeCama, estadoDeIntegrante, guardarBorradorFicha,
   hayConexion, leerBorradorFicha, olvidarConfirmarPendiente, revisarCama, buscarCama, esSoloLectura, camaPorDefecto, rotuloDeIntegrante,
+  textoIdentidadARevisar,
 } from '../services/emergenciaLlegadas';
 import {
   ESQUEMA_FICHA, MAXIMOS, NIVELES_EDUCATIVOS, PARENTESCOS, PREGUNTAS_CRITICAS, ROTULOS_SECCION, SECCIONES_OPCIONALES, SEXOS_FICHA,
@@ -603,6 +604,7 @@ export default function EmergenciaFichaScreen({
             persona.plaza ? `Cama ${persona.plaza.nombre || persona.plaza.codigo}` : null, persona.parentesco || null].filter(Boolean).join(' · ')}</Text>
         ) : null}
         {modo === 'completar' && faltan.length ? <Text style={ayuda}>{`Falta: ${faltan.join(', ')}.`}</Text> : null}
+        {persona.identidad_a_revisar ? avisoDe('warning', textoIdentidadARevisar(persona.identidad_a_revisar), 'alert-circle-outline') : null}
         {lectura ? avisoDe('info', caso?.estado === 'CERRADO' ? TEXTO_CERRADO : 'La familia ya no está en ingreso: esta persona no se puede confirmar desde acá.', 'lock-closed-outline') : null}
       </View>
 

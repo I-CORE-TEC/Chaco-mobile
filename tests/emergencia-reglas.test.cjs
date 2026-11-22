@@ -244,3 +244,55 @@ test('lo que confirmó un legajo es del DNI: cambiar el sexo a mano no lo invali
   assert.equal(r.personaConfirmada(personas, {dni: '30111222', sexo: 'M'}), false);
   assert.equal(r.personaConfirmada({estado: 'escaneado', dni: '30111222', sexo: 'F'}, {dni: '30111222', sexo: 'M'}), false);
 });
+
+// ---- v1.2.31: teléfono (M2) e identidad en conflicto (A3) ----
+
+test('teléfono: mismas reglas que el back (8 a 15 dígitos, solo dígitos, espacios, + - y paréntesis); vacío no se valida', async () => {
+  const r = await cargar();
+  const err = (telefono) => r.validarCaso({...VALIDO, telefono}).telefono;
+  assert.equal(err(''), undefined);
+  assert.equal(err('   '), undefined);
+  assert.equal(err('12345678'), undefined);
+  assert.equal(err('+54 (362) 400-0000'), undefined);
+  assert.equal(err('1'.repeat(15)), undefined);
+  assert.ok(err('123'));
+  assert.ok(err('1234567'));
+  assert.ok(err('1'.repeat(16)));
+  assert.ok(err('3624-abc-0000'));
+  assert.ok(err('362.400.0000'));
+  assert.deepEqual(plano(err('123')), ['Ingresá un teléfono de 8 a 15 dígitos.']);
+});
+
+test('erroresDelServidor: persona_registrada se conserva como objeto, no como mensaje, y no aparece en la lista', async () => {
+  const r = await cargar();
+  const errores = r.erroresDelServidor({code: 'VALIDACION', detail: 'x', dni: ['Ese DNI ya está registrado como otra persona.'],
+    persona_registrada: {apellido: 'FARIÑA', nombre: 'Joaquin'}});
+  assert.deepEqual(plano(errores), {dni: ['Ese DNI ya está registrado como otra persona.'], persona_registrada: {apellido: 'FARIÑA', nombre: 'Joaquin'}});
+  assert.deepEqual(plano(r.personaEnConflicto(errores)), {apellido: 'FARIÑA', nombre: 'Joaquin'});
+  assert.deepEqual(plano(r.listaDeErrores(errores).map((e) => e.campo)), ['dni']);
+  assert.equal(r.personaEnConflicto(r.erroresDelServidor({dni: ['Otro error'], persona_registrada: 'texto'})), null);
+  assert.equal(r.personaEnConflicto({}), null);
+});
+
+test('identidad en conflicto: «es esa persona» manda solo el DNI; «es otra persona» manda identidad_en_conflicto con el nombre cargado', async () => {
+  const r = await cargar();
+  const persona = {apellido: 'FARIÑA', nombre: 'Joaquin'};
+  const base = {...r.datosIniciales(), ...VALIDO, nombre: 'Pedro', apellido: 'Gómez'};
+  assert.equal(r.datosDelCaso(base).identidad_en_conflicto, undefined);
+
+  const misma = r.resolverIdentidad(base, 'misma', persona);
+  const cuerpoMisma = r.datosDelCaso(misma);
+  assert.deepEqual([cuerpoMisma.nombre, cuerpoMisma.apellido, cuerpoMisma.identidad_en_conflicto], ['', '', undefined]);
+  assert.deepEqual([misma.nombre, misma.apellido], ['Joaquin', 'FARIÑA'], 'la pantalla muestra a la persona registrada');
+  assert.deepEqual(plano(r.validarCaso({...misma, nombre: '', apellido: ''})), {}, 'sin nombre ni apellido se puede enviar');
+
+  const otra = r.resolverIdentidad(base, 'otra', persona);
+  const cuerpoOtra = r.datosDelCaso(otra);
+  assert.deepEqual([cuerpoOtra.nombre, cuerpoOtra.apellido, cuerpoOtra.identidad_en_conflicto], ['Pedro', 'Gómez', true]);
+  assert.ok(r.validarCaso({...otra, nombre: '', apellido: ''}).nombre, '«otra persona» sigue pidiendo el nombre');
+
+  const sinRespuesta = r.sinRespuestaDeIdentidad(otra);
+  assert.deepEqual([sinRespuesta.es_misma_persona, sinRespuesta.identidad_en_conflicto], [false, false]);
+  assert.equal(r.datosDelCaso(sinRespuesta).identidad_en_conflicto, undefined);
+  assert.ok(r.validarCaso({...sinRespuesta, nombre: '', apellido: ''}).nombre, 'otro DNI: vuelve a pedir el nombre');
+});

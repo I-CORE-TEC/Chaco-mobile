@@ -55,7 +55,7 @@ test('cierres: validación de cliente igual a la del servicio del back', async (
   igual(l.validarAlojar({tarjeta_entregada: true, tarjeta_numero: '  '}), {tarjeta_numero: [l.FALTA_TARJETA]});
   igual(l.validarAlojar({tarjeta_entregada: false, tarjeta_numero: 'x'.repeat(99)}), {}, 'sin tarjeta, el número no cuenta');
   igual(Object.keys(l.validarAlojar({aula: 'x'.repeat(81), tarjeta_entregada: true, tarjeta_numero: 'x'.repeat(41), encargado: 'x'.repeat(121)})),
-    ['aula', 'tarjeta_numero', 'encargado']);
+    ['aula', 'tarjeta_numero'], 'el encargado ya no se valida: lo registra el back con el usuario logueado');
   igual(l.validarDiferencia({}), {motivo: [l.FALTA_MOTIVO_DIFERENCIA]});
   igual(l.validarDiferencia({motivo: 'OTRO', observacion: ' '}), {observacion: [l.FALTA_OBSERVACION]});
   igual(l.validarDiferencia({motivo: 'NO_LLEGO'}), {});
@@ -84,12 +84,12 @@ test('cierres: normaliza la respuesta de §13.9, el texto de camas liberadas y e
 test('alojar: POST JSON a /casos/{id}/alojar/ con la sección 4; lo vacío no viaja; 200 → hecho', async () => {
   const {r, l, sesion} = await preparar();
   const calls = router(r, () => response(200, {estado: 'ALOJADO', total_alojado: 7, liberadas: 2}));
-  const a = await l.alojar(sesion, 184, {sector: '3', aula: ' Aula 3 ', tarjeta_entregada: true, tarjeta_numero: ' 0042 ', encargado: ''});
+  const a = await l.alojar(sesion, 184, {sector: '3', aula: ' Aula 3 ', tarjeta_entregada: true, tarjeta_numero: ' 0042 '});
   igual(a, {resultado: 'hecho', estado: 'ALOJADO', total_alojado: 7, liberadas: 2});
   igual([calls[0].method, calls[0].url, calls[0].auth, calls[0].tipo], ['POST', '/api/emergencia/casos/184/alojar/', 'Token tok', 'application/json']);
   igual(calls[0].body, {tarjeta_entregada: true, sector: 3, aula: 'Aula 3', tarjeta_numero: '0042'});
   await l.alojar(sesion, 184, {sector: null, tarjeta_entregada: false, tarjeta_numero: 'olvidado', encargado: ' Ana '});
-  igual(calls[1].body, {tarjeta_entregada: false, encargado: 'Ana'}, 'sin tarjeta no va el número');
+  igual(calls[1].body, {tarjeta_entregada: false}, 'sin tarjeta no va el número, y el encargado nunca viaja');
   assert.ok(!('uuid_cliente' in calls[0].body), 'alojar no lleva uuid: no es idempotente');
 });
 

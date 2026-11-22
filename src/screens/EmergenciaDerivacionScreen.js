@@ -7,7 +7,7 @@ import { useTheme } from '../context/ThemeContext';
 import { useToast } from '../context/ToastContext';
 import {
   MAX_OBSERVACION, MOTIVOS_RECHAZO, TEXTO_SIN_RED, abrirSesion, aceptar, clasificarErrorLlegada, escucharRed, hayConexion,
-  nombreDelResponsable, rechazar, resumenDeAsistencia, resumenDelGrupo, tituloDeNecesidad, validarRechazo,
+  nombreDelResponsable, rechazar, resumenDeAsistencia, resumenDelGrupo, textoIdentidadARevisar, tituloDeNecesidad, validarRechazo,
 } from '../services/emergenciaLlegadas';
 import { formatDate } from '../utils/dates';
 import { statusTones } from '../theme/statusBadges';
@@ -223,6 +223,7 @@ export default function EmergenciaDerivacionScreen({
         </View>
         {derivacion.vencida ? avisoDe('warning', TEXTO_VENCIDA, 'time-outline') : null}
         {dato('Responsable', nombreDelResponsable(derivacion.responsable))}
+        {derivacion.responsable?.identidad_a_revisar ? avisoDe('warning', textoIdentidadARevisar(derivacion.responsable.identidad_a_revisar), 'alert-circle-outline') : null}
         {dato('Camas pedidas', `${derivacion.plazas_pedidas}${caso?.total_declarado ? ` · ${caso.total_declarado} personas declaradas` : ''}`)}
         {libres != null ? <Text style={ayuda}>{libres === 1 ? '1 cama libre en este dispositivo' : `${libres || 'Sin'} camas libres en este dispositivo`}</Text> : null}
         {dato('Derivada', [derivacion.derivada_por, derivacion.derivada_en ? formatDate(derivacion.derivada_en, { includeTime: true }) : null].filter(Boolean).join(' · '))}
