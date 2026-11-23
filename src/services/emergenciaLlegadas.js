@@ -3,7 +3,7 @@ import * as Crypto from 'expo-crypto';
 import { getBecasToken, getStoredBecasUser } from './becasApi';
 import {
   aceptarDerivacion, agregarIntegrante, alojarFamilia, avisarALaMesa, buscarFamilia, cancelarIngreso, cerrarConDiferencia,
-  completarFichaIntegrante, confirmarIntegrante, errorObsoleto, esConflictoDeEstado, esUuidEnUso, getIntegrante, getIntegrantes,
+  completarFichaIntegrante, confirmarIntegrante, errorObsoleto, esConflictoDeEstado, esUuidEnUso, getDerivacionDetalle, getDerivacionesDispositivo, getIntegrante, getIntegrantes,
   getPlazas, idDeDerivacion, ingresoDirecto, quitarIntegrante, rechazarDerivacion,
 } from './emergenciaApi';
 import { esSinModulo } from './sinModulo';
@@ -39,6 +39,7 @@ export const TEXTO_ACEPTAR_INCIERTO = 'No se pudo confirmar si la derivación se
 export const TEXTO_RECHAZAR_INCIERTO = 'No se pudo confirmar si el rechazo llegó. «Reintentar» lo vuelve a mandar: si ya había llegado, el caso figura de vuelta en la mesa.';
 export const TEXTO_AGREGAR_INCIERTO = 'No se pudo confirmar si se sumó la persona. «Reintentar» manda el mismo pedido y no la suma dos veces.';
 export const TEXTO_NO_ENCONTRADO = 'Esto ya no está disponible para vos. Se vuelve a cargar la lista de tus dispositivos.';
+export const TEXTO_NO_DISPONIBLE = 'La derivación ya no está disponible.';
 export const TEXTO_SESION = 'La sesión venció: volvé a entrar.';
 export const TEXTO_ACEPTADA_ANTES = 'La derivación ya figura aceptada: seguís con los integrantes.';
 export const TEXTO_RECHAZADA_ANTES = 'La derivación ya no está pendiente: el caso figura de vuelta en la mesa.';
@@ -168,6 +169,25 @@ export const normalizarBusqueda = (payload) => {
     edificio_derivado: normalizarEdificio(datos.edificio_derivado),
   };
 };
+
+// Lista de familias derivadas a la sede (GET dispositivos/{id}/derivaciones/): una lista simple, ya ordenada
+// por vencimiento. Una fila sin `id` se descarta; cualquier otra cosa que no sea lista es lista vacía.
+export const PRIORIDADES = { ALTA: ['Prioridad alta', 'danger'], MEDIA: ['Prioridad media', 'warning'], BAJA: ['Prioridad baja', 'gray'] };
+export const normalizarListaDerivaciones = (payload) => (Array.isArray(payload) ? payload : [])
+  .filter((fila) => fila && typeof fila === 'object' && fila.id != null)
+  .map((fila) => ({
+    id: fila.id,
+    apellido: textoPlano(fila.apellido).trim(),
+    personas: entero(fila.personas),
+    caso_numero: textoPlano(fila.caso_numero),
+    prioridad: textoPlano(fila.prioridad),
+    vence_en: fila.vence_en || null,
+    por_vencer: fila.por_vencer === true,
+    edificio: normalizarEdificio(fila.edificio),
+  }));
+
+export const tituloDeFamilia = (fila) => (fila?.apellido ? `Familia ${fila.apellido}` : 'Familia sin apellido');
+export const textoDePersonas = (n) => (n === 1 ? '1 persona' : `${n} personas`);
 
 // Qué botones de M2-6 ofrece una búsqueda SIN_DERIVACION (§13.2): el back dice el alcance; la app solo
 // suma las camas. Con un back que no manda las banderas (`null`) se ofrecen como antes.
@@ -457,6 +477,44 @@ const crearUuid = () => String(Crypto.randomUUID()).toLowerCase();
 // anterior: queda como estaba.
 const PRUEBAN_ESTADO = ['validacion', 'conflicto', 'no_encontrado'];
 const sigueIncierto = (tipo, previo) => tipo === 'reintentable' || (previo && !PRUEBAN_ESTADO.includes(tipo));
+
+// La lista de familias derivadas a la sede (GET dispositivos/{id}/derivaciones/). Devuelve { filas, falla }: una lista
+// vacía es `filas: []` sin falla (solo el buscador); una falla de lectura (5xx, timeout, red, página HTML) es
+// `falla: { mensaje }` para ofrecer «Reintentar». Sin red, sin módulo, 404, sesión vencida o sesión cambiada no son
+// una falla de la lista: la pantalla ya lo dice por su cuenta (banner, 403 del buscador) y queda solo el buscador.
+export const cargarDerivaciones = async (sesion, dispositivoId) => {
+  try {
+    const payload = await conSesion(sesion, (op) => getDerivacionesDispositivo(dispositivoId, op), { timeoutMs: LIMITES.lecturaMs });
+    return { filas: normalizarListaDerivaciones(payload), falla: null };
+  } catch (error) {
+    const tipo = error?.clasificacion?.tipo;
+    if (tipo === 'reintentable' || tipo === 'rechazo') return { filas: [], falla: { mensaje: TEXTO_REINTENTAR_LECTURA } };
+    return { filas: [], falla: null };
+  }
+};
+
+// Al tocar una fila: la derivación completa (GET derivaciones/{id}/), con la misma forma que la búsqueda por DNI.
+// `identidad_a_revisar` llega siempre null por este camino: es «sin dato», la pantalla no dice nada de eso.
+// `plazas_libres` queda en null: el detalle no lo trae, y el del dispositivo queda viejo tras aceptar una familia.
+// - 200 con la derivación pendiente → { busqueda }.
+// - 404 (JSON o página HTML) y 200 que ya no es PENDIENTE → error 'no_encontrado'; 409 → 'conflicto' (con el detail).
+// Todo error sale con `clasificacion`; el de sesión cambiada ('obsoleto') se relanza tal cual.
+export const cargarDetalleDerivacion = async (sesion, fila) => {
+  try {
+    const payload = await conSesion(sesion, (op) => getDerivacionDetalle(fila.id, op), { timeoutMs: LIMITES.lecturaMs });
+    const derivacion = normalizarDerivacion(payload);
+    if (!derivacion || derivacion.estado !== 'PENDIENTE') {
+      throw crearError('NO_PENDIENTE', TEXTO_NO_DISPONIBLE, { clasificacion: { tipo: 'no_encontrado', mensaje: TEXTO_NO_DISPONIBLE } });
+    }
+    return { busqueda: { resultado: 'DERIVACION', dni: '', plazas_libres: null, mensaje: '', derivacion } };
+  } catch (error) {
+    if (error?.clasificacion?.tipo === 'obsoleto') throw error;
+    if (Number(error?.status) === 404) {
+      throw Object.assign(error, { clasificacion: { tipo: 'no_encontrado', mensaje: TEXTO_NO_DISPONIBLE } });
+    }
+    throw error;
+  }
+};
 
 // §13.3. Aceptar NO es idempotente. `incierto`: un intento anterior de esta pantalla salió sin que se
 // supiera si llegó. Devuelve:

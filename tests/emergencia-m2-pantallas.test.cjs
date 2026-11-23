@@ -210,7 +210,7 @@ test('Buscar: DERIVACION PENDIENTE abre la derivación; ACEPTADA va a los integr
     await ui.escribir('DNI', '30.111.222');
     assert.equal(ui.input('DNI').props.value, '30111222', 'solo dígitos');
     await ui.pressButton('Buscar');
-    assert.deepEqual(api(ui.calls).map(c => c.url), ['/api/emergencia/dispositivos/7/buscar/?dni=30111222']);
+    assert.deepEqual(sinLista(ui.calls).map(c => c.url), ['/api/emergencia/dispositivos/7/buscar/?dni=30111222']);
     assert.equal(ui.eventos[0][0], 'derivacion');
     assert.equal(ui.eventos[0][1].derivacion.id, 55);
     resultado = {...BUSQUEDA, derivacion: {...DERIVACION, estado: 'ACEPTADA', caso: {...CASO, estado: 'INGRESO_EN_CURSO'}}};
@@ -276,7 +276,7 @@ test('Buscar: un DNI inválido no pide nada; 400 VALIDACION `dni` se marca en el
   try {
     await ui.escribir('DNI', '123');
     await ui.pressButton('Buscar');
-    assert.equal(api(ui.calls).length, 0);
+    assert.equal(sinLista(ui.calls).length, 0);
     assert.ok(ui.labels().includes('Ingresá un DNI válido de 7 u 8 dígitos, sin puntos.'));
     assert.equal(ui.input('DNI').props.style.find(s => s && s.borderColor).borderColor, '#D00000');
     await ui.escribir('DNI', '1234567');
@@ -296,7 +296,7 @@ test('Buscar: 429 con Retry-After deshabilita el botón con la cuenta regresiva 
     assert.equal(boton.props.disabled, true);
     assert.ok(ui.labels().includes('Hiciste muchas búsquedas seguidas. Esperá a que termine la cuenta para volver a buscar.'));
     await renderer.act(async () => { await boton.props.onPress(); await esperar(5); });
-    assert.equal(api(ui.calls).length, 1, 'durante la espera no vuelve a pedir');
+    assert.equal(sinLista(ui.calls).length, 1, 'durante la espera no vuelve a pedir');
   } finally { await ui.close(); }
 });
 
@@ -329,13 +329,13 @@ test('Buscar sin red: se bloquea con aviso y no pide nada; con red vuelve a anda
     assert.equal(fondoDe(ui.tree, SIN_RED), '#FFF8F1');
     await ui.escribir('DNI', '30111222');
     await ui.pressButton('Buscar');
-    assert.equal(api(ui.calls).length, 0);
+    assert.equal(sinLista(ui.calls).length, 0);
     ui.runtime.setOnline(true);
     await ui.rerender({});
     // El aviso sigue hasta que la red avisa; tocar con red vuelve a probar.
     const boton = ui.button('Buscar');
     await renderer.act(async () => { await boton.props.onPress(); await esperar(5); });
-    assert.equal(api(ui.calls).length, 1, 'con red la búsqueda sale');
+    assert.equal(sinLista(ui.calls).length, 1, 'con red la búsqueda sale');
     assert.equal(ui.eventos[0][0], 'derivacion');
   } finally { await ui.close(); }
 });
@@ -346,7 +346,7 @@ test('Buscar: un segundo toque mientras busca no pide de nuevo; la respuesta tra
   await ui.escribir('DNI', '30111222');
   await renderer.act(async () => { ui.button('Buscar').props.onPress(); await esperar(5); });
   await renderer.act(async () => { ui.button('Buscar').props.onPress(); await esperar(5); });
-  assert.equal(api(ui.calls).length, 1);
+  assert.equal(sinLista(ui.calls).length, 1);
   await ui.close();
   soltar();
   await esperar(20);
@@ -358,7 +358,7 @@ test('Buscar: toques sin espera entre medio (la red tarda en contestar) mandan u
   try {
     await ui.escribir('DNI', '30111222');
     await renderer.act(async () => { const p = ui.button('Buscar').props.onPress; p(); p(); p(); await esperar(10); });
-    assert.equal(api(ui.calls).length, 1);
+    assert.equal(sinLista(ui.calls).length, 1);
   } finally { await ui.close(); }
 });
 
@@ -374,19 +374,19 @@ test('Buscar: la espera del 429 viene del padre (sobrevive a re-entrar) y se le 
   const otra = await montarBuscar(() => response(200, BUSQUEDA), {props: {esperaHasta: Date.now() + 10000, dniInicial: '30111222', autoBuscar: true}});
   try {
     assert.ok(otra.button('Buscar en 10 s') || otra.button('Buscar en 9 s') || otra.button('Buscar en 8 s'), 'botones: ' + otra.titulos());
-    assert.equal(api(otra.calls).length, 0, 'ni la búsqueda automática sale durante la espera');
+    assert.equal(sinLista(otra.calls).length, 0, 'ni la búsqueda automática sale durante la espera');
   } finally { await otra.close(); }
 });
 
 test('Buscar: con `autoBuscar` (recarga por DERIVADO) busca sola con el DNI que trae', async () => {
   const ui = await montarBuscar(() => response(200, BUSQUEDA), {props: {dniInicial: '30111222', autoBuscar: true}});
   try {
-    assert.deepEqual(api(ui.calls).map(c => c.url), ['/api/emergencia/dispositivos/7/buscar/?dni=30111222']);
+    assert.deepEqual(sinLista(ui.calls).map(c => c.url), ['/api/emergencia/dispositivos/7/buscar/?dni=30111222']);
     assert.equal(ui.eventos[0][0], 'derivacion');
   } finally { await ui.close(); }
   const sinAuto = await montarBuscar(() => response(200, BUSQUEDA), {props: {dniInicial: '30111222'}});
   try {
-    assert.equal(api(sinAuto.calls).length, 0);
+    assert.equal(sinLista(sinAuto.calls).length, 0);
     assert.equal(sinAuto.input('DNI').props.value, '30111222');
   } finally { await sinAuto.close(); }
 });
@@ -406,13 +406,13 @@ test('Buscar: la respuesta que llega con otra sesión ya abierta se descarta', a
 
 // ---- Derivación ----
 
-async function montarDerivacion(rutas, {online = true, busqueda = BUSQUEDA} = {}) {
+async function montarDerivacion(rutas, {online = true, busqueda = BUSQUEDA, directa = false} = {}) {
   const env = await entorno(rutas);
   env.runtime.setOnline(online);
   const eventos = [];
   const enviando = [];
   const Screen = loadScreen('src/screens/EmergenciaDerivacionScreen.js', env.mocks);
-  const ui = await render(Screen, {busqueda: env.llegadas.normalizarBusqueda(busqueda),
+  const ui = await render(Screen, {busqueda: directa ? busqueda : env.llegadas.normalizarBusqueda(busqueda),
     onAceptada: (c, r) => eventos.push(['aceptada', plano(c), r.resultado]), onRechazada: r => eventos.push(['rechazada', plano(r)]),
     onConflicto: c => eventos.push(['conflicto', plano(c)]), onNoEncontrado: () => eventos.push(['no_encontrado']),
     onSinModulo: m => eventos.push(['sin_modulo', m]), onEnviando: v => enviando.push(v)});
@@ -863,7 +863,8 @@ async function montarApp({integrantes = null, ficha = null} = {}) {
   const pantallas = {};
   const alerts = [];
   const toasts = [];
-  const capturar = nombre => props => { pantallas[nombre] = props; return null; };
+  const montajes = {};
+  const capturar = nombre => props => { pantallas[nombre] = props; React.useEffect(() => { montajes[nombre] = (montajes[nombre] || 0) + 1; }, []); return null; };
   const mocks = {
     react: React, 'react-native': native,
     '../context/AuthContext': {useAuth: () => ({user: {nombre: 'Ana'}, logout() {}})},
@@ -899,7 +900,7 @@ async function montarApp({integrantes = null, ficha = null} = {}) {
   await renderer.act(async () => { tree = renderer.create(React.createElement(App, {})); });
   const banner = () => tree.root.findByType('Banner');
   const hacer = async (fn) => renderer.act(async () => { fn(); await esperar(2); });
-  return {pantallas, alerts, toasts, banner, hacer, titulo: () => banner().props.title, atras: () => hacer(() => banner().props.onBackPress()),
+  return {pantallas, montajes, alerts, toasts, banner, hacer, titulo: () => banner().props.title, atras: () => hacer(() => banner().props.onBackPress()),
     vista: () => ['dispositivos', 'buscar', 'derivacion', 'integrantes', 'ficha', 'cierre', 'puerta'].find(n => tree.root.findAll(x => x.type === mocks[`../screens/${{dispositivos: 'EmergenciaMisDispositivosScreen', buscar: 'EmergenciaLlegadaBuscarScreen', derivacion: 'EmergenciaDerivacionScreen', integrantes: 'EmergenciaIntegrantesScreen', ficha: 'EmergenciaFichaScreen', cierre: 'EmergenciaCierreScreen', puerta: 'EmergenciaPuertaScreen'}[n]}`].default).length),
     close: () => renderer.act(async () => tree.unmount())};
 }
@@ -1110,4 +1111,289 @@ test('Cambio 553: la derivación muestra el edificio solo si viene', async () =>
   try {
     assert.ok(!nulo.labels().includes('Edificio'));
   } finally { await nulo.close(); }
+});
+
+// ---- Lista de familias derivadas a la sede (Chaco-Back#1364) ----
+
+const FILA_LISTA = (id, extra = {}) => ({id, apellido: 'Benítez', personas: 7, caso_numero: '2026-C-000184', prioridad: 'ALTA',
+  vence_en: '2026-11-12T12:00:00-03:00', por_vencer: false, edificio: {id: 8, nombre: 'Edificio Norte'}, ...extra});
+const URL_LISTA = '/api/emergencia/dispositivos/7/derivaciones/';
+const sinLista = calls => api(calls).filter(c => !c.url.endsWith('/derivaciones/'));
+const esFila = p => /^Familia /.test(p.props.accessibilityLabel || '');
+
+test('Lista de derivaciones: normaliza las filas y descarta lo que no sirve', async () => {
+  const {normalizarListaDerivaciones, tituloDeFamilia, textoDePersonas} = (await entorno(() => response(200, {}))).llegadas;
+  assert.deepEqual(plano(normalizarListaDerivaciones([FILA_LISTA(55), {apellido: 'sin id'}, null, FILA_LISTA(56, {edificio: null, por_vencer: true, personas: 1})])), [
+    {id: 55, apellido: 'Benítez', personas: 7, caso_numero: '2026-C-000184', prioridad: 'ALTA', vence_en: '2026-11-12T12:00:00-03:00',
+      por_vencer: false, edificio: {id: 8, nombre: 'Edificio Norte'}},
+    {id: 56, apellido: 'Benítez', personas: 1, caso_numero: '2026-C-000184', prioridad: 'ALTA', vence_en: '2026-11-12T12:00:00-03:00',
+      por_vencer: true, edificio: null}]);
+  for (const raro of [null, undefined, {}, 'x', {detail: 'No encontrado.'}]) assert.deepEqual(plano(normalizarListaDerivaciones(raro)), []);
+  assert.equal(tituloDeFamilia({apellido: 'Benítez'}), 'Familia Benítez');
+  assert.equal(tituloDeFamilia({apellido: ''}), 'Familia sin apellido');
+  assert.equal(textoDePersonas(1), '1 persona');
+  assert.equal(textoDePersonas(7), '7 personas');
+});
+
+test('Buscar con lista: las familias van ANTES del buscador, con sus datos, y las por vencer se destacan', async () => {
+  const ui = await montarBuscar((call) => call.url === URL_LISTA
+    ? response(200, [FILA_LISTA(55, {por_vencer: true}), FILA_LISTA(56, {apellido: 'Gómez', personas: 1, prioridad: 'BAJA', caso_numero: '2026-C-000190', edificio: null})])
+    : response(200, BUSQUEDA));
+  try {
+    assert.deepEqual(api(ui.calls).map(c => c.url), [URL_LISTA]);
+    const textos = ui.labels();
+    assert.ok(textos.indexOf('Derivaciones por aceptar') >= 0 && textos.indexOf('Derivaciones por aceptar') < textos.indexOf('Buscar a la familia'));
+    for (const t of ['Familia Benítez', '7 personas · Caso 2026-C-000184', 'Prioridad alta', 'Por vencer', 'Edificio Edificio Norte',
+      'Familia Gómez', '1 persona · Caso 2026-C-000190', 'Prioridad baja']) assert.ok(textos.includes(t), 'Falta ' + t + ' en ' + textos);
+    assert.ok(textos.some(t => t.startsWith('Vence ')));
+    assert.equal(textos.filter(t => t === 'Por vencer').length, 1, 'solo la que está por vencer');
+    const filas = ui.pressables().filter(esFila);
+    assert.deepEqual(filas.map(f => f.props.accessibilityLabel.split(',')[0]), ['Familia Benítez', 'Familia Gómez'], 'el orden del servidor');
+    const fondo = f => [].concat(f.props.style({pressed: false})).flat().find(e => e && e.backgroundColor)?.backgroundColor;
+    assert.notEqual(fondo(filas[0]), fondo(filas[1]), 'la por vencer tiene otro fondo');
+    assert.equal(ui.input('DNI').props.value, '', 'el buscador sigue');
+    assert.ok(ui.titulos().includes('Buscar'));
+  } finally { await ui.close(); }
+});
+
+const HTML_404 = () => response(404, '<!doctype html><html><title>Not Found</title></html>', {'content-type': 'text/html'});
+const URL_DETALLE = id => `/api/emergencia/derivaciones/${id}/`;
+const DETALLE_56 = {...DERIVACION, id: 56, caso: {...CASO, id: 190, numero: '2026-C-000190'},
+  responsable: {nombre: 'Luis', apellido: 'Gómez', dni: '28111222', identidad_a_revisar: null}};
+const montarLista = (detalle, props = {}) => {
+  const abiertas = [];
+  const conflictos = [];
+  const noDisponible = [];
+  return montarBuscar((call) => call.url === URL_LISTA ? response(200, [FILA_LISTA(55), FILA_LISTA(56, {apellido: 'Gómez'})])
+    : call.url.startsWith('/api/emergencia/derivaciones/') ? detalle(call) : response(200, BUSQUEDA),
+  {props: {onDerivacionDeLista: b => abiertas.push(plano(b)), onConflictoDeLista: c => conflictos.push(plano(c)),
+    onDerivacionNoDisponible: () => noDisponible.push(true), ...props}}).then(ui => ({...ui, abiertas, conflictos, noDisponible,
+    tocar: async apellido => {
+      const fila = ui.pressables().find(p => new RegExp('^Familia ' + apellido).test(p.props.accessibilityLabel || ''));
+      await renderer.act(async () => { fila.props.onPress(); await esperar(10); });
+    }}));
+};
+
+test('Buscar con lista: tocar una fila trae el detalle de ESA fila y abre la derivación completa, sin pedir el DNI', async () => {
+  const ui = await montarLista(() => response(200, DETALLE_56));
+  try {
+    await ui.tocar('Gómez');
+    assert.deepEqual(sinLista(ui.calls).map(c => [c.method, c.url]), [['GET', URL_DETALLE(56)]]);
+    assert.equal(ui.abiertas.length, 1);
+    const {derivacion} = ui.abiertas[0];
+    assert.equal(derivacion.id, 56);
+    assert.equal(derivacion.necesidades.length, 2, 'datos completos');
+    assert.equal(derivacion.responsable.dni, '28111222');
+    assert.equal(derivacion.telefono, '3624000000');
+    assert.equal(derivacion.caso.id, 190);
+    assert.equal(derivacion.responsable.identidad_a_revisar, null);
+    assert.equal(ui.abiertas[0].dni, '');
+    assert.deepEqual(ui.eventos, [], 'no es la búsqueda por DNI');
+  } finally { await ui.close(); }
+});
+
+test('Buscar con lista: 409 del detalle va al padre con el detail y no abre nada', async () => {
+  const detail = 'La derivación ya fue aceptada por otra guardia.';
+  const ui = await montarLista(() => response(409, {detail, estado_actual: 'INGRESO_EN_CURSO'}));
+  try {
+    await ui.tocar('Gómez');
+    assert.equal(ui.abiertas.length, 0);
+    assert.deepEqual(ui.conflictos.map(c => [c.tipo, c.mensaje, c.estadoActual]), [['conflicto', detail, 'INGRESO_EN_CURSO']]);
+    assert.equal(ui.noDisponible.length, 0);
+  } finally { await ui.close(); }
+});
+
+test('Buscar con lista: 404 con el JSON del back es «ya no está disponible»; no abre nada', async () => {
+  const ui = await montarLista(() => response(404, {detail: 'No encontrado.'}));
+  try {
+    await ui.tocar('Gómez');
+    assert.equal(ui.abiertas.length, 0);
+    assert.equal(ui.noDisponible.length, 1);
+    assert.equal(ui.conflictos.length, 0);
+  } finally { await ui.close(); }
+});
+
+test('Buscar con lista: error de red o 500 en el detalle muestra aviso con «Reintentar»; el reintento abre', async () => {
+  let intento = 0;
+  const ui = await montarLista(() => { intento += 1; return intento === 1 ? Promise.reject(new TypeError('Load failed')) : response(200, DETALLE_56); });
+  try {
+    await ui.tocar('Gómez');
+    assert.equal(ui.abiertas.length, 0);
+    assert.ok(ui.labels().includes('No se pudo hablar con el servidor. Probá de nuevo.'));
+    assert.ok(ui.titulos().includes('Reintentar'));
+    assert.ok(ui.labels().includes('Familia Gómez'), 'la lista sigue');
+    await ui.pressButton('Reintentar');
+    assert.equal(intento, 2);
+    assert.equal(ui.abiertas.length, 1);
+    assert.equal(ui.abiertas[0].derivacion.id, 56);
+    assert.ok(!ui.titulos().includes('Reintentar'));
+  } finally { await ui.close(); }
+  const cinco = await montarLista(() => response(503, {detail: 'down'}));
+  try {
+    await cinco.tocar('Benítez');
+    assert.ok(cinco.titulos().includes('Reintentar'));
+    assert.equal(cinco.abiertas.length, 0);
+  } finally { await cinco.close(); }
+});
+
+test('Buscar con lista: un detalle que ya no está pendiente se trata como «ya no está disponible»', async () => {
+  const ui = await montarLista(() => response(200, {...DETALLE_56, estado: 'ACEPTADA'}));
+  try {
+    await ui.tocar('Gómez');
+    assert.equal(ui.abiertas.length, 0);
+    assert.equal(ui.noDisponible.length, 1);
+  } finally { await ui.close(); }
+});
+
+test('Buscar sin derivaciones: ni lista ni título, solo el buscador', async () => {
+  const ui = await montarBuscar((call) => call.url === URL_LISTA ? response(200, []) : response(200, BUSQUEDA));
+  try {
+    assert.ok(!ui.labels().includes('Derivaciones por aceptar'));
+    assert.equal(ui.pressables().filter(esFila).length, 0);
+    assert.ok(ui.labels().includes('Buscar a la familia'));
+  } finally { await ui.close(); }
+});
+
+test('Buscar sin red: no pide la lista y muestra el aviso de siempre', async () => {
+  const ui = await montarBuscar(() => response(200, []), {online: false});
+  try {
+    assert.deepEqual(api(ui.calls).map(c => c.url), []);
+    assert.ok(ui.labels().includes(SIN_RED));
+  } finally { await ui.close(); }
+});
+
+
+const pendiente = () => { let soltar; const promesa = new Promise(r => { soltar = r; }); return {promesa, soltar}; };
+
+test('Buscar con lista: 404 de página HTML (ruta que no existe) avisa «ya no está disponible» y NO abre nada', async () => {
+  const ui = await montarLista(HTML_404);
+  try {
+    await ui.tocar('Gómez');
+    assert.equal(ui.abiertas.length, 0);
+    assert.equal(ui.noDisponible.length, 1);
+    assert.equal(ui.conflictos.length, 0);
+  } finally { await ui.close(); }
+});
+
+test('Buscar con lista: doble toque u otra fila mientras carga el detalle mandan un solo GET', async () => {
+  const espera = pendiente();
+  const ui = await montarLista(() => espera.promesa);
+  try {
+    await ui.tocar('Gómez');
+    await ui.tocar('Gómez');
+    await ui.tocar('Benítez');
+    assert.deepEqual(sinLista(ui.calls).map(c => c.url), [URL_DETALLE(56)]);
+    assert.ok(ui.tree.root.findAllByType('ActivityIndicator').some(n => n.props.accessibilityLabel === 'Abriendo la derivación'));
+    espera.soltar(response(200, DETALLE_56));
+    await renderer.act(async () => { await esperar(10); });
+    assert.equal(ui.abiertas.length, 1);
+    assert.equal(sinLista(ui.calls).length, 1);
+  } finally { await ui.close(); }
+});
+
+test('Buscar con lista: salir de la pantalla mientras carga el detalle no navega después', async () => {
+  const espera = pendiente();
+  const ui = await montarLista(() => espera.promesa);
+  await ui.tocar('Gómez');
+  await ui.close();
+  espera.soltar(response(200, DETALLE_56));
+  await esperar(20);
+  assert.deepEqual([ui.abiertas.length, ui.conflictos.length, ui.noDisponible.length], [0, 0, 0]);
+});
+
+test('Buscar con lista: 401 del detalle no abre ni navega; 403 SIN_MODULO va al módulo', async () => {
+  const sesion = await montarLista(() => response(401, {detail: 'Invalid token.'}));
+  try {
+    await sesion.tocar('Gómez');
+    assert.equal(sesion.abiertas.length, 0);
+    // Un 401 cierra la sesión (la maneja la capa de auth): la pantalla no abre nada, no navega y no ofrece reintentar.
+    assert.deepEqual([sesion.conflictos.length, sesion.noDisponible.length], [0, 0]);
+    assert.ok(!sesion.titulos().includes('Reintentar'));
+  } finally { await sesion.close(); }
+  const modulo = await montarLista(() => response(403, {detail: 'Tu usuario no admite familias.', code: 'SIN_MODULO'}));
+  try {
+    await modulo.tocar('Gómez');
+    assert.equal(modulo.abiertas.length, 0);
+    assert.equal(modulo.eventos.filter(e => e[0] === 'sin_modulo').length, 1);
+  } finally { await modulo.close(); }
+});
+
+test('Derivación completa desde la lista: identidad_a_revisar null no muestra aviso de identidad; aceptar y rechazar usan el id', async () => {
+  const env = await entorno(() => response(200, ACEPTACION));
+  const busqueda = plano(env.llegadas.normalizarBusqueda({resultado: 'DERIVACION', dni: '', plazas_libres: 0, derivacion: DETALLE_56}));
+  await env.runtime.close?.();
+  const ui = await montarDerivacion(() => response(200, ACEPTACION), {busqueda, directa: true});
+  try {
+    const textos = ui.labels();
+    assert.ok(!textos.some(x => /Identidad a revisar/.test(x)), 'sin dato no se afirma nada');
+    assert.equal(ui.tree.root.findAll(n => n.props.accessibilityRole === 'alert').length, 0);
+    assert.ok(textos.includes('Caso 2026-C-000190'));
+    assert.ok(textos.some(x => x.startsWith('Luis Gómez')));
+    assert.ok(textos.includes('La familia') && textos.includes('Camas pedidas'));
+    await ui.pressButton('Aceptar y reservar camas');
+    assert.equal(posts(ui.calls, 'aceptar')[0].url, '/api/emergencia/derivaciones/56/aceptar/');
+  } finally { await ui.close(); }
+});
+
+test('Buscar: falla de la LISTA (500 o red) muestra «Reintentar» y el buscador sigue; vacía, 404 y 403 no avisan nada', async () => {
+  for (const [nombre, falla] of [['500', () => response(500, {detail: 'boom'})], ['red', () => Promise.reject(new TypeError('Load failed'))]]) {
+    let intentos = 0;
+    const ui = await montarBuscar((call) => {
+      if (call.url !== URL_LISTA) return response(200, BUSQUEDA);
+      intentos += 1;
+      return intentos === 1 ? falla() : response(200, [FILA_LISTA(55)]);
+    });
+    try {
+      assert.ok(ui.labels().includes('No se pudo hablar con el servidor. Probá de nuevo.'), nombre);
+      assert.ok(ui.titulos().includes('Reintentar'), nombre);
+      assert.ok(!ui.labels().includes('Derivaciones por aceptar'), nombre);
+      assert.ok(ui.titulos().includes('Buscar') && !ui.button('Buscar').props.disabled, nombre + ': el buscador sigue usable');
+      await ui.escribir('DNI', '30111222');
+      await ui.pressButton('Buscar');
+      assert.equal(ui.eventos[0]?.[0], 'derivacion', nombre);
+      await ui.pressButton('Reintentar');
+      assert.equal(intentos, 2, nombre);
+      assert.ok(ui.labels().includes('Derivaciones por aceptar') && ui.labels().includes('Familia Benítez'), nombre);
+      assert.ok(!ui.titulos().includes('Reintentar'), nombre);
+    } finally { await ui.close(); }
+  }
+  for (const [nombre, respuesta] of [['404', () => response(404, {detail: 'No encontrado.'})], ['403', () => response(403, {detail: 'Sin módulo.', code: 'SIN_MODULO'})]]) {
+    const ui = await montarBuscar((call) => call.url === URL_LISTA ? respuesta() : response(200, BUSQUEDA));
+    try {
+      assert.ok(!ui.titulos().includes('Reintentar'), nombre);
+      assert.deepEqual(ui.eventos, [], nombre);
+      assert.equal(ui.tree.root.findAll(n => n.props.accessibilityRole === 'alert').length, 0, nombre);
+      assert.ok(ui.labels().includes('Buscar a la familia'), nombre);
+    } finally { await ui.close(); }
+  }
+});
+
+test('EmergenciaApp: tras un 409 o 404 del detalle se vuelve a la lista y se MONTA de nuevo (por eso se recarga); sin DNI y con el texto único', async () => {
+  const {TEXTO_NO_DISPONIBLE} = (await entorno(() => response(200, {}))).llegadas;
+  const ui = await montarApp();
+  try {
+    await ui.hacer(() => ui.pantallas.inicio.onAbrir({clave: 'llegadas', titulo: 'Llegada de familias'}));
+    await ui.hacer(() => ui.pantallas.dispositivos.onElegir({id: 7, nombre: 'Club Sarmiento'}, {unico: false}));
+    await ui.hacer(() => ui.pantallas.buscar.onDerivacion({dni: '30111222', derivacion: {id: 99, caso: CASO}}));
+    await ui.atras();
+    assert.equal(ui.pantallas.buscar.dniInicial, '30111222');
+    const completa = {resultado: 'DERIVACION', dni: '', plazas_libres: null, derivacion: {id: 56, caso: {...CASO, id: 190}}};
+    await ui.hacer(() => ui.pantallas.buscar.onDerivacionDeLista(completa));
+    assert.equal(ui.vista(), 'derivacion');
+    assert.equal(ui.pantallas.derivacion.busqueda.derivacion.id, 56);
+    await ui.atras();
+    assert.equal(ui.pantallas.buscar.dniInicial, '', 'el DNI viejo era de otra familia: no se arrastra');
+    const m0 = ui.montajes.buscar;
+    await ui.hacer(() => ui.pantallas.buscar.onConflictoDeLista({tipo: 'conflicto', destino: 'buscar', estadoActual: 'INGRESO_EN_CURSO', mensaje: 'Ya la aceptó Juan.'}));
+    assert.equal(ui.vista(), 'buscar');
+    assert.equal(ui.alerts.at(-1)[1], 'Ya la aceptó Juan.');
+    assert.equal(ui.montajes.buscar, m0 + 1, '409: la lista se monta de nuevo y se vuelve a pedir');
+    assert.equal(ui.pantallas.buscar.dniInicial, '');
+    assert.equal(ui.pantallas.buscar.autoBuscar, false);
+    const toastsAntes = ui.toasts.length;
+    await ui.hacer(() => ui.pantallas.buscar.onDerivacionNoDisponible());
+    assert.equal(ui.vista(), 'buscar');
+    assert.equal(ui.montajes.buscar, m0 + 2, '404: ídem');
+    assert.deepEqual(ui.toasts.slice(toastsAntes).map(x => [x.type, x.message]), [['warning', TEXTO_NO_DISPONIBLE]]);
+  } finally { await ui.close(); }
 });

@@ -68,6 +68,8 @@ const SALIR_CON_CAMBIOS = {
 const TEXTO_SALIR_PENDIENTE = 'Hay un envío de esta familia sin resultado. Queda guardado en este teléfono: cuando vuelvas a abrir a la familia podés reintentarlo.';
 export const TEXTO_ENVIANDO = 'Se está enviando. Esperá un momento.';
 // El mismo texto que TEXTO_PERSONA_NO_ENCONTRADA de emergenciaLlegadas (el router no importa servicios).
+// Igual que TEXTO_NO_DISPONIBLE de emergenciaLlegadas (un test los compara).
+const TEXTO_NO_DISPONIBLE = 'La derivación ya no está disponible.';
 const TEXTO_PERSONA_NO_ENCONTRADA = 'Esa persona ya no está en la familia, o el caso ya no es de tu dispositivo. Se vuelven a cargar los integrantes.';
 
 // Al volver la red, `alVolver`. En web, el evento `online` del navegador (la cola mira
@@ -313,6 +315,18 @@ export default function EmergenciaApp({ onCambiarModulo }) {
   }));
   const elegirDispositivoLlegadas = (dispositivo, { unico = false } = {}) => setPantalla({ vista: 'llegadas_buscar', dispositivo, unico, dni: '', n: 1 });
   const verDerivacion = (busqueda) => setPantalla((actual) => ({ ...actual, vista: 'llegadas_derivacion', busqueda, dni: busqueda.dni || actual.dni }));
+  // Desde la lista de familias derivadas: no hay DNI (el último buscado era de otra familia, no se arrastra).
+  const verDerivacionDeLista = (busqueda) => setPantalla((actual) => ({ ...actual, vista: 'llegadas_derivacion', busqueda, dni: '' }));
+  // La derivación que se tocó en la lista ya no está pendiente (409) o ya no existe (404): se dice y se
+  // vuelve a la lista, que se recarga.
+  const conflictoDeLista = (clasificacion) => {
+    showAlert('El caso cambió', clasificacion.mensaje, [{ text: 'Entendido' }]);
+    verBuscar();
+  };
+  const derivacionNoDisponible = () => {
+    showToast({ type: 'warning', message: TEXTO_NO_DISPONIBLE });
+    verBuscar();
+  };
   const verIntegrantes = (caso, dni) => setPantalla((actual) => ({
     ...actual, vista: 'llegadas_integrantes', caso, dni: dni ?? actual.dni, n: (actual.n || 0) + 1,
   }));
@@ -385,7 +399,7 @@ export default function EmergenciaApp({ onCambiarModulo }) {
       const base = { dispositivo: actual.dispositivo, unico: actual.unico, dni: actual.dni || '', n: (actual.n || 0) + 1 };
       // El bucle con un caso CERRADO/ALOJADO sin ingreso aceptado lo corta la pantalla de integrantes: un
       // 409 de su propio GET nunca vuelve a mandar acá con destino integrantes.
-      if (clasificacion.destino === 'integrantes' && caso) return { ...base, vista: 'llegadas_integrantes', caso };
+      if (clasificacion.destino === 'integrantes' && caso?.id != null) return { ...base, vista: 'llegadas_integrantes', caso };
       if (clasificacion.destino === 'derivacion' && base.dni) return { ...base, vista: 'llegadas_buscar', autoBuscar: true };
       return { ...base, vista: 'llegadas_buscar', autoBuscar: false };
     });
@@ -493,12 +507,13 @@ export default function EmergenciaApp({ onCambiarModulo }) {
         {pestana === 'inicio' && vista === 'llegadas_buscar' ? (
           <EmergenciaLlegadaBuscarScreen key={`buscar-${pantalla.dispositivo?.id}-${pantalla.n}`} dispositivo={pantalla.dispositivo}
             dniInicial={pantalla.dni} autoBuscar={!!pantalla.autoBuscar} esperaHasta={esperaBuscarHasta} onEspera={setEsperaBuscarHasta}
-            onDerivacion={verDerivacion} onIntegrantes={verIntegrantes}
+            onDerivacion={verDerivacion} onDerivacionDeLista={verDerivacionDeLista}
+            onConflictoDeLista={conflictoDeLista} onDerivacionNoDisponible={derivacionNoDisponible} onIntegrantes={verIntegrantes}
             onNoEncontrado={llegadaNoEncontrada} onSinModulo={sinModulo} onSinDerivacion={verPuerta} />
         ) : null}
         {pestana === 'inicio' && vista === 'llegadas_derivacion' ? (
           <EmergenciaDerivacionScreen key={`derivacion-${pantalla.busqueda?.derivacion?.id}`} busqueda={pantalla.busqueda}
-            onAceptada={(caso) => { setEnviando(false); verIntegrantes(caso); }}
+            onAceptada={(caso) => { setEnviando(false); if (caso?.id != null) verIntegrantes(caso); else verBuscar(); }}
             onRechazada={() => { setEnviando(false); verBuscar(); }}
             onConflicto={recargarPorEstado} onNoEncontrado={llegadaNoEncontrada} onSinModulo={sinModulo} onEnviando={setEnviando} />
         ) : null}
