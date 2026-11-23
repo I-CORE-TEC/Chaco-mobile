@@ -68,6 +68,8 @@ const SALIR_CON_CAMBIOS = {
 const TEXTO_SALIR_PENDIENTE = 'Hay un envío de esta familia sin resultado. Queda guardado en este teléfono: cuando vuelvas a abrir a la familia podés reintentarlo.';
 export const TEXTO_ENVIANDO = 'Se está enviando. Esperá un momento.';
 // El mismo texto que TEXTO_PERSONA_NO_ENCONTRADA de emergenciaLlegadas (el router no importa servicios).
+// Igual que TEXTO_NO_DISPONIBLE de emergenciaLlegadas (un test los compara).
+const TEXTO_NO_DISPONIBLE = 'La derivación ya no está disponible.';
 const TEXTO_PERSONA_NO_ENCONTRADA = 'Esa persona ya no está en la familia, o el caso ya no es de tu dispositivo. Se vuelven a cargar los integrantes.';
 
 // Al volver la red, `alVolver`. En web, el evento `online` del navegador (la cola mira
@@ -322,7 +324,7 @@ export default function EmergenciaApp({ onCambiarModulo }) {
     verBuscar();
   };
   const derivacionNoDisponible = () => {
-    showToast({ type: 'warning', message: 'La derivación ya no está disponible.' });
+    showToast({ type: 'warning', message: TEXTO_NO_DISPONIBLE });
     verBuscar();
   };
   const verIntegrantes = (caso, dni) => setPantalla((actual) => ({

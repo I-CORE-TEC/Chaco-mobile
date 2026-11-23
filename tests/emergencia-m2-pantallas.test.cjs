@@ -863,7 +863,8 @@ async function montarApp({integrantes = null, ficha = null} = {}) {
   const pantallas = {};
   const alerts = [];
   const toasts = [];
-  const capturar = nombre => props => { pantallas[nombre] = props; return null; };
+  const montajes = {};
+  const capturar = nombre => props => { pantallas[nombre] = props; React.useEffect(() => { montajes[nombre] = (montajes[nombre] || 0) + 1; }, []); return null; };
   const mocks = {
     react: React, 'react-native': native,
     '../context/AuthContext': {useAuth: () => ({user: {nombre: 'Ana'}, logout() {}})},
@@ -899,7 +900,7 @@ async function montarApp({integrantes = null, ficha = null} = {}) {
   await renderer.act(async () => { tree = renderer.create(React.createElement(App, {})); });
   const banner = () => tree.root.findByType('Banner');
   const hacer = async (fn) => renderer.act(async () => { fn(); await esperar(2); });
-  return {pantallas, alerts, toasts, banner, hacer, titulo: () => banner().props.title, atras: () => hacer(() => banner().props.onBackPress()),
+  return {pantallas, montajes, alerts, toasts, banner, hacer, titulo: () => banner().props.title, atras: () => hacer(() => banner().props.onBackPress()),
     vista: () => ['dispositivos', 'buscar', 'derivacion', 'integrantes', 'ficha', 'cierre', 'puerta'].find(n => tree.root.findAll(x => x.type === mocks[`../screens/${{dispositivos: 'EmergenciaMisDispositivosScreen', buscar: 'EmergenciaLlegadaBuscarScreen', derivacion: 'EmergenciaDerivacionScreen', integrantes: 'EmergenciaIntegrantesScreen', ficha: 'EmergenciaFichaScreen', cierre: 'EmergenciaCierreScreen', puerta: 'EmergenciaPuertaScreen'}[n]}`].default).length),
     close: () => renderer.act(async () => tree.unmount())};
 }
@@ -1121,7 +1122,7 @@ const sinLista = calls => api(calls).filter(c => !c.url.endsWith('/derivaciones/
 const esFila = p => /^Familia /.test(p.props.accessibilityLabel || '');
 
 test('Lista de derivaciones: normaliza las filas y descarta lo que no sirve', async () => {
-  const {normalizarListaDerivaciones, busquedaDeFila, tituloDeFamilia, textoDePersonas} = (await entorno(() => response(200, {}))).llegadas;
+  const {normalizarListaDerivaciones, tituloDeFamilia, textoDePersonas} = (await entorno(() => response(200, {}))).llegadas;
   assert.deepEqual(plano(normalizarListaDerivaciones([FILA_LISTA(55), {apellido: 'sin id'}, null, FILA_LISTA(56, {edificio: null, por_vencer: true, personas: 1})])), [
     {id: 55, apellido: 'Benítez', personas: 7, caso_numero: '2026-C-000184', prioridad: 'ALTA', vence_en: '2026-11-12T12:00:00-03:00',
       por_vencer: false, edificio: {id: 8, nombre: 'Edificio Norte'}},
@@ -1132,14 +1133,6 @@ test('Lista de derivaciones: normaliza las filas y descarta lo que no sirve', as
   assert.equal(tituloDeFamilia({apellido: ''}), 'Familia sin apellido');
   assert.equal(textoDePersonas(1), '1 persona');
   assert.equal(textoDePersonas(7), '7 personas');
-  const [fila] = normalizarListaDerivaciones([FILA_LISTA(55)]);
-  const busqueda = busquedaDeFila(fila, 9);
-  assert.equal(busqueda.derivacion.id, 55, 'entra al flujo con el id de la fila');
-  assert.equal(busqueda.derivacion.estado, 'PENDIENTE');
-  assert.equal(busqueda.derivacion.parcial, true);
-  assert.equal(busqueda.derivacion.caso.numero, '2026-C-000184');
-  assert.equal(busqueda.derivacion.caso.id, null);
-  assert.equal(busqueda.dni, '');
 });
 
 test('Buscar con lista: las familias van ANTES del buscador, con sus datos, y las por vencer se destacan', async () => {
@@ -1189,7 +1182,7 @@ test('Buscar con lista: tocar una fila trae el detalle de ESA fila y abre la der
     assert.equal(ui.abiertas.length, 1);
     const {derivacion} = ui.abiertas[0];
     assert.equal(derivacion.id, 56);
-    assert.equal(derivacion.parcial, undefined, 'datos completos, no parciales');
+    assert.equal(derivacion.necesidades.length, 2, 'datos completos');
     assert.equal(derivacion.responsable.dni, '28111222');
     assert.equal(derivacion.telefono, '3624000000');
     assert.equal(derivacion.caso.id, 190);
@@ -1210,24 +1203,13 @@ test('Buscar con lista: 409 del detalle va al padre con el detail y no abre nada
   } finally { await ui.close(); }
 });
 
-test('Buscar con lista: 404 con el JSON del back es «ya no está disponible»; no cae al modo parcial', async () => {
+test('Buscar con lista: 404 con el JSON del back es «ya no está disponible»; no abre nada', async () => {
   const ui = await montarLista(() => response(404, {detail: 'No encontrado.'}));
   try {
     await ui.tocar('Gómez');
     assert.equal(ui.abiertas.length, 0);
     assert.equal(ui.noDisponible.length, 1);
     assert.equal(ui.conflictos.length, 0);
-  } finally { await ui.close(); }
-});
-
-test('Buscar con lista: 404 de página HTML (back anterior sin la ruta) abre la derivación PARCIAL con lo de la fila', async () => {
-  const ui = await montarLista(HTML_404);
-  try {
-    await ui.tocar('Gómez');
-    assert.equal(ui.noDisponible.length, 0);
-    assert.equal(ui.abiertas.length, 1);
-    assert.equal(ui.abiertas[0].derivacion.id, 56);
-    assert.equal(ui.abiertas[0].derivacion.parcial, true);
   } finally { await ui.close(); }
 });
 
@@ -1272,28 +1254,6 @@ test('Buscar sin derivaciones: ni lista ni título, solo el buscador', async () 
   } finally { await ui.close(); }
 });
 
-test('Buscar con back anterior (404), 403, 500 o red caída: queda como antes, sin error ni lista', async () => {
-  const casos = [
-    ['404', () => response(404, {detail: 'No encontrado.'})],
-    ['403 sin módulo', () => response(403, {detail: 'Sin módulo.', code: 'SIN_MODULO'})],
-    ['500', () => response(500, {detail: 'boom'})],
-    ['red', () => Promise.reject(new TypeError('Load failed'))],
-  ];
-  for (const [nombre, falla] of casos) {
-    const ui = await montarBuscar((call) => call.url === URL_LISTA ? falla() : response(200, BUSQUEDA));
-    try {
-      assert.deepEqual(api(ui.calls).map(c => c.url), [URL_LISTA], nombre);
-      assert.ok(!ui.labels().includes('Derivaciones por aceptar'), nombre);
-      assert.deepEqual(ui.eventos, [], nombre + ': el 404 de la lista no es «dispositivo no encontrado»');
-      assert.ok(ui.labels().includes('Buscar a la familia'), nombre);
-      assert.equal(ui.tree.root.findAll(n => n.props.accessibilityRole === 'alert').length, 0, nombre + ': sin avisos');
-      await ui.escribir('DNI', '30111222');
-      await ui.pressButton('Buscar');
-      assert.equal(ui.eventos[0]?.[0], 'derivacion', nombre + ': el buscador por DNI sigue andando');
-    } finally { await ui.close(); }
-  }
-});
-
 test('Buscar sin red: no pide la lista y muestra el aviso de siempre', async () => {
   const ui = await montarBuscar(() => response(200, []), {online: false});
   try {
@@ -1302,38 +1262,114 @@ test('Buscar sin red: no pide la lista y muestra el aviso de siempre', async () 
   } finally { await ui.close(); }
 });
 
-test('Derivación abierta desde la lista: muestra lo que hay, no inventa lo que falta, y aceptar/rechazar usan el id de la fila', async () => {
-  const {normalizarListaDerivaciones, busquedaDeFila} = (await entorno(() => response(200, {}))).llegadas;
-  const [fila] = normalizarListaDerivaciones([FILA_LISTA(55, {por_vencer: true})]);
-  const busqueda = plano(busquedaDeFila(fila, 9));
+
+const pendiente = () => { let soltar; const promesa = new Promise(r => { soltar = r; }); return {promesa, soltar}; };
+
+test('Buscar con lista: 404 de página HTML (ruta que no existe) avisa «ya no está disponible» y NO abre nada', async () => {
+  const ui = await montarLista(HTML_404);
+  try {
+    await ui.tocar('Gómez');
+    assert.equal(ui.abiertas.length, 0);
+    assert.equal(ui.noDisponible.length, 1);
+    assert.equal(ui.conflictos.length, 0);
+  } finally { await ui.close(); }
+});
+
+test('Buscar con lista: doble toque u otra fila mientras carga el detalle mandan un solo GET', async () => {
+  const espera = pendiente();
+  const ui = await montarLista(() => espera.promesa);
+  try {
+    await ui.tocar('Gómez');
+    await ui.tocar('Gómez');
+    await ui.tocar('Benítez');
+    assert.deepEqual(sinLista(ui.calls).map(c => c.url), [URL_DETALLE(56)]);
+    assert.ok(ui.tree.root.findAllByType('ActivityIndicator').some(n => n.props.accessibilityLabel === 'Abriendo la derivación'));
+    espera.soltar(response(200, DETALLE_56));
+    await renderer.act(async () => { await esperar(10); });
+    assert.equal(ui.abiertas.length, 1);
+    assert.equal(sinLista(ui.calls).length, 1);
+  } finally { await ui.close(); }
+});
+
+test('Buscar con lista: salir de la pantalla mientras carga el detalle no navega después', async () => {
+  const espera = pendiente();
+  const ui = await montarLista(() => espera.promesa);
+  await ui.tocar('Gómez');
+  await ui.close();
+  espera.soltar(response(200, DETALLE_56));
+  await esperar(20);
+  assert.deepEqual([ui.abiertas.length, ui.conflictos.length, ui.noDisponible.length], [0, 0, 0]);
+});
+
+test('Buscar con lista: 401 del detalle no abre ni navega; 403 SIN_MODULO va al módulo', async () => {
+  const sesion = await montarLista(() => response(401, {detail: 'Invalid token.'}));
+  try {
+    await sesion.tocar('Gómez');
+    assert.equal(sesion.abiertas.length, 0);
+    // Un 401 cierra la sesión (la maneja la capa de auth): la pantalla no abre nada, no navega y no ofrece reintentar.
+    assert.deepEqual([sesion.conflictos.length, sesion.noDisponible.length], [0, 0]);
+    assert.ok(!sesion.titulos().includes('Reintentar'));
+  } finally { await sesion.close(); }
+  const modulo = await montarLista(() => response(403, {detail: 'Tu usuario no admite familias.', code: 'SIN_MODULO'}));
+  try {
+    await modulo.tocar('Gómez');
+    assert.equal(modulo.abiertas.length, 0);
+    assert.equal(modulo.eventos.filter(e => e[0] === 'sin_modulo').length, 1);
+  } finally { await modulo.close(); }
+});
+
+test('Derivación completa desde la lista: identidad_a_revisar null no muestra aviso de identidad; aceptar y rechazar usan el id', async () => {
+  const env = await entorno(() => response(200, ACEPTACION));
+  const busqueda = plano(env.llegadas.normalizarBusqueda({resultado: 'DERIVACION', dni: '', plazas_libres: 0, derivacion: DETALLE_56}));
+  await env.runtime.close?.();
   const ui = await montarDerivacion(() => response(200, ACEPTACION), {busqueda, directa: true});
   try {
     const textos = ui.labels();
-    for (const t of ['Caso 2026-C-000184', 'Prioridad alta', 'Por vencer', 'Benítez', 'Edificio Norte']) {
-      assert.ok(textos.some(x => x.includes(t)), 'Falta ' + t + ' en ' + textos);
-    }
-    assert.ok(!textos.includes('La familia'), 'sin composición inventada');
-    assert.ok(!textos.some(x => x.includes('Sin detalle de personas') || x.includes('Camas pedidas') || x.includes('DNI')));
-    assert.ok(textos.some(x => x.startsWith('Abriste la derivación desde la lista')));
+    assert.ok(!textos.some(x => /Identidad a revisar/.test(x)), 'sin dato no se afirma nada');
+    assert.equal(ui.tree.root.findAll(n => n.props.accessibilityRole === 'alert').length, 0);
+    assert.ok(textos.includes('Caso 2026-C-000190'));
+    assert.ok(textos.some(x => x.startsWith('Luis Gómez')));
+    assert.ok(textos.includes('La familia') && textos.includes('Camas pedidas'));
     await ui.pressButton('Aceptar y reservar camas');
-    assert.equal(posts(ui.calls, 'aceptar')[0].url, '/api/emergencia/derivaciones/55/aceptar/');
-    assert.equal(ui.eventos[0][0], 'aceptada');
-    assert.equal(ui.eventos[0][1].id, 184, 'el caso lo da el servidor al aceptar');
+    assert.equal(posts(ui.calls, 'aceptar')[0].url, '/api/emergencia/derivaciones/56/aceptar/');
   } finally { await ui.close(); }
-  const rech = await montarDerivacion(() => response(200, {caso_estado: 'EN_GESTION'}), {busqueda, directa: true});
-  try {
-    await rech.pressButton('Rechazar');
-    await rech.press('Motivo: Otro');
-    await rech.escribir('Observación del rechazo', 'Se fueron');
-    await rech.pressButton('Confirmar rechazo');
-    await rech.aceptarAlerta('Rechazar');
-    assert.equal(posts(rech.calls, 'rechazar')[0].url, '/api/emergencia/derivaciones/55/rechazar/');
-  } finally { await rech.close(); }
 });
 
-test('EmergenciaApp: la fila de la lista abre la derivación sin DNI; si el caso no llega, aceptar no sigue a integrantes', async () => {
-  const {normalizarListaDerivaciones, busquedaDeFila} = (await entorno(() => response(200, {}))).llegadas;
-  const [fila] = normalizarListaDerivaciones([FILA_LISTA(55)]);
+test('Buscar: falla de la LISTA (500 o red) muestra «Reintentar» y el buscador sigue; vacía, 404 y 403 no avisan nada', async () => {
+  for (const [nombre, falla] of [['500', () => response(500, {detail: 'boom'})], ['red', () => Promise.reject(new TypeError('Load failed'))]]) {
+    let intentos = 0;
+    const ui = await montarBuscar((call) => {
+      if (call.url !== URL_LISTA) return response(200, BUSQUEDA);
+      intentos += 1;
+      return intentos === 1 ? falla() : response(200, [FILA_LISTA(55)]);
+    });
+    try {
+      assert.ok(ui.labels().includes('No se pudo hablar con el servidor. Probá de nuevo.'), nombre);
+      assert.ok(ui.titulos().includes('Reintentar'), nombre);
+      assert.ok(!ui.labels().includes('Derivaciones por aceptar'), nombre);
+      assert.ok(ui.titulos().includes('Buscar') && !ui.button('Buscar').props.disabled, nombre + ': el buscador sigue usable');
+      await ui.escribir('DNI', '30111222');
+      await ui.pressButton('Buscar');
+      assert.equal(ui.eventos[0]?.[0], 'derivacion', nombre);
+      await ui.pressButton('Reintentar');
+      assert.equal(intentos, 2, nombre);
+      assert.ok(ui.labels().includes('Derivaciones por aceptar') && ui.labels().includes('Familia Benítez'), nombre);
+      assert.ok(!ui.titulos().includes('Reintentar'), nombre);
+    } finally { await ui.close(); }
+  }
+  for (const [nombre, respuesta] of [['404', () => response(404, {detail: 'No encontrado.'})], ['403', () => response(403, {detail: 'Sin módulo.', code: 'SIN_MODULO'})]]) {
+    const ui = await montarBuscar((call) => call.url === URL_LISTA ? respuesta() : response(200, BUSQUEDA));
+    try {
+      assert.ok(!ui.titulos().includes('Reintentar'), nombre);
+      assert.deepEqual(ui.eventos, [], nombre);
+      assert.equal(ui.tree.root.findAll(n => n.props.accessibilityRole === 'alert').length, 0, nombre);
+      assert.ok(ui.labels().includes('Buscar a la familia'), nombre);
+    } finally { await ui.close(); }
+  }
+});
+
+test('EmergenciaApp: tras un 409 o 404 del detalle se vuelve a la lista y se MONTA de nuevo (por eso se recarga); sin DNI y con el texto único', async () => {
+  const {TEXTO_NO_DISPONIBLE} = (await entorno(() => response(200, {}))).llegadas;
   const ui = await montarApp();
   try {
     await ui.hacer(() => ui.pantallas.inicio.onAbrir({clave: 'llegadas', titulo: 'Llegada de familias'}));
@@ -1341,27 +1377,23 @@ test('EmergenciaApp: la fila de la lista abre la derivación sin DNI; si el caso
     await ui.hacer(() => ui.pantallas.buscar.onDerivacion({dni: '30111222', derivacion: {id: 99, caso: CASO}}));
     await ui.atras();
     assert.equal(ui.pantallas.buscar.dniInicial, '30111222');
-    await ui.hacer(() => ui.pantallas.buscar.onDerivacionDeLista(plano(busquedaDeFila(fila, 9))));
+    const completa = {resultado: 'DERIVACION', dni: '', plazas_libres: null, derivacion: {id: 56, caso: {...CASO, id: 190}}};
+    await ui.hacer(() => ui.pantallas.buscar.onDerivacionDeLista(completa));
     assert.equal(ui.vista(), 'derivacion');
-    assert.equal(ui.pantallas.derivacion.busqueda.derivacion.id, 55);
+    assert.equal(ui.pantallas.derivacion.busqueda.derivacion.id, 56);
     await ui.atras();
-    assert.equal(ui.vista(), 'buscar');
     assert.equal(ui.pantallas.buscar.dniInicial, '', 'el DNI viejo era de otra familia: no se arrastra');
-    await ui.hacer(() => ui.pantallas.buscar.onDerivacionDeLista(plano(busquedaDeFila(fila, 9))));
-    await ui.hacer(() => ui.pantallas.derivacion.onAceptada(null));
-    assert.equal(ui.vista(), 'buscar', 'sin caso con id no hay a qué integrantes ir');
-    await ui.hacer(() => ui.pantallas.buscar.onDerivacionDeLista(plano(busquedaDeFila(fila, 9))));
-    await ui.hacer(() => ui.pantallas.derivacion.onConflicto({tipo: 'conflicto', destino: 'integrantes', estadoActual: 'INGRESO_EN_CURSO', mensaje: 'Ya la aceptó Juan.'}));
-    assert.equal(ui.vista(), 'buscar', 'un 409 sin caso conocido vuelve a buscar');
-    // 409 / 404 del detalle desde la lista: se dice, se vuelve a la lista (la pantalla se monta de nuevo) y sin DNI.
+    const m0 = ui.montajes.buscar;
     await ui.hacer(() => ui.pantallas.buscar.onConflictoDeLista({tipo: 'conflicto', destino: 'buscar', estadoActual: 'INGRESO_EN_CURSO', mensaje: 'Ya la aceptó Juan.'}));
     assert.equal(ui.vista(), 'buscar');
     assert.equal(ui.alerts.at(-1)[1], 'Ya la aceptó Juan.');
+    assert.equal(ui.montajes.buscar, m0 + 1, '409: la lista se monta de nuevo y se vuelve a pedir');
     assert.equal(ui.pantallas.buscar.dniInicial, '');
     assert.equal(ui.pantallas.buscar.autoBuscar, false);
     const toastsAntes = ui.toasts.length;
     await ui.hacer(() => ui.pantallas.buscar.onDerivacionNoDisponible());
     assert.equal(ui.vista(), 'buscar');
-    assert.deepEqual(ui.toasts.slice(toastsAntes).map(x => [x.type, x.message]), [['warning', 'La derivación ya no está disponible.']]);
+    assert.equal(ui.montajes.buscar, m0 + 2, '404: ídem');
+    assert.deepEqual(ui.toasts.slice(toastsAntes).map(x => [x.type, x.message]), [['warning', TEXTO_NO_DISPONIBLE]]);
   } finally { await ui.close(); }
 });

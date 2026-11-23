@@ -5,7 +5,7 @@ import TextInput from '../components/FormInput';
 import CustomButton from '../components/CustomButton';
 import { useTheme } from '../context/ThemeContext';
 import {
-  TEXTO_SIN_RED, abrirSesion, buscar, clasificarErrorLlegada, escucharRed, hayConexion, pasoDeBusqueda,
+  TEXTO_REINTENTAR_LECTURA, TEXTO_SIN_RED, abrirSesion, buscar, clasificarErrorLlegada, escucharRed, hayConexion, pasoDeBusqueda,
   accionesSinDerivacion, textoDerivadaAOtroEdificio, PRIORIDADES, cargarDerivaciones, cargarDetalleDerivacion, textoDePersonas, tituloDeFamilia,
 } from '../services/emergenciaLlegadas';
 import { cleanDigits } from '../utils/dni';
@@ -48,6 +48,8 @@ export default function EmergenciaLlegadaBuscarScreen({
   const [ahora, setAhora] = useState(Date.now());
   const [derivaciones, setDerivaciones] = useState([]);
   const [abriendo, setAbriendo] = useState(null);
+  const [fallaLista, setFallaLista] = useState(null);
+  const [reintentoLista, setReintentoLista] = useState(0);
   const [falloAbrir, setFalloAbrir] = useState(null);
   const montado = useRef(true);
   const buscandoRef = useRef(false);
@@ -72,14 +74,18 @@ export default function EmergenciaLlegadaBuscarScreen({
     };
   }, [dispositivo?.id]);
 
-  // La lista de familias derivadas a la sede, antes del buscador. Es una mejora: si el back no la tiene (404),
-  // no hay red o falla, queda vacía y la pantalla es la de siempre. Se vuelve a pedir al volver la red.
+  // La lista de familias derivadas a la sede, antes del buscador. Vacía: solo el buscador. Si falla la lectura,
+  // aviso con «Reintentar» y el buscador sigue usable. Se vuelve a pedir al volver la red.
   useEffect(() => {
     if (!sesion || sinRed) return;
     let vigente = true;
-    cargarDerivaciones(sesion, dispositivo.id).then((filas) => { if (vigente && montado.current) setDerivaciones(filas); });
+    cargarDerivaciones(sesion, dispositivo.id).then(({ filas, falla }) => {
+      if (!vigente || !montado.current) return;
+      setDerivaciones(filas);
+      setFallaLista(falla);
+    });
     return () => { vigente = false; };
-  }, [sesion, sinRed, dispositivo?.id]);
+  }, [sesion, sinRed, dispositivo?.id, reintentoLista]);
 
   const esperando = esperaHasta > ahora;
   useEffect(() => {
@@ -144,14 +150,14 @@ export default function EmergenciaLlegadaBuscarScreen({
   };
 
   // Tocar una fila: se trae la derivación completa y se abre el mismo flujo de aceptar o rechazar. 409 →
-  // `onConflictoDeLista` (muestra el detail y recarga la lista); 404 → `onDerivacionNoDisponible`.
+  // `onConflictoDeLista` (muestra el detail y recarga la lista); 404 → `onDerivacionNoDisponible`. Un solo pedido a la vez.
   const abrirFila = async (fila) => {
     if (buscandoRef.current || !sesion) return;
     buscandoRef.current = true;
     setAbriendo(fila.id);
     setFalloAbrir(null);
     try {
-      const { busqueda } = await cargarDetalleDerivacion(sesion, fila, dispositivo.plazas_libres ?? null);
+      const { busqueda } = await cargarDetalleDerivacion(sesion, fila);
       if (!montado.current) return;
       onDerivacionDeLista?.(busqueda);
     } catch (e) {
@@ -221,6 +227,13 @@ export default function EmergenciaLlegadaBuscarScreen({
       keyboardShouldPersistTaps="handled"
       keyboardDismissMode={keyboardDismissModeFor(Platform.OS === 'ios' ? 'interactive' : 'on-drag')}>
       {sinRed ? avisoDe('warning', TEXTO_SIN_RED, 'cloud-offline-outline') : null}
+
+      {fallaLista ? (
+        <View style={styles.lista}>
+          {avisoDe('warning', fallaLista.mensaje)}
+          <CustomButton title="Reintentar" variant="secondary" iconLeft="refresh" onPress={() => setReintentoLista((n) => n + 1)} />
+        </View>
+      ) : null}
 
       {derivaciones.length ? (
         <View style={styles.lista}>

@@ -189,36 +189,6 @@ export const normalizarListaDerivaciones = (payload) => (Array.isArray(payload) 
 export const tituloDeFamilia = (fila) => (fila?.apellido ? `Familia ${fila.apellido}` : 'Familia sin apellido');
 export const textoDePersonas = (n) => (n === 1 ? '1 persona' : `${n} personas`);
 
-// La pantalla de aceptar/rechazar se arma con una búsqueda por DNI; la fila trae menos datos. Esto arma la
-// misma forma con lo que hay (`parcial: true`) para entrar al MISMO flujo con el `id` de la fila. Lo que la
-// fila no trae (nombre y DNI del responsable, camas pedidas, quién derivó, composición, necesidades,
-// teléfono, observaciones) queda vacío y la pantalla lo oculta. `caso.id` es null: el servidor lo devuelve al aceptar.
-export const busquedaDeFila = (fila, plazasLibres = null) => ({
-  resultado: 'DERIVACION',
-  dni: '',
-  plazas_libres: plazasLibres,
-  mensaje: '',
-  derivacion: {
-    id: fila.id,
-    estado: 'PENDIENTE',
-    parcial: true,
-    personas: fila.personas,
-    plazas_pedidas: null,
-    vence_en: fila.vence_en,
-    vencida: false,
-    por_vencer: fila.por_vencer,
-    derivada_en: null,
-    derivada_por: '',
-    caso: { id: null, numero: fila.caso_numero, estado: 'DERIVADO', prioridad: fila.prioridad, total_declarado: fila.personas },
-    responsable: { nombre: '', apellido: fila.apellido, dni: '', identidad_a_revisar: null },
-    grupo: {},
-    necesidades: [],
-    telefono: '',
-    observaciones: '',
-    edificio: fila.edificio,
-  },
-});
-
 // Qué botones de M2-6 ofrece una búsqueda SIN_DERIVACION (§13.2): el back dice el alcance; la app solo
 // suma las camas. Con un back que no manda las banderas (`null`) se ofrecen como antes.
 // Con la familia derivada a otro edificio (Cambio 553) no se ofrece ninguna: «Avisar a la mesa» crearía un
@@ -508,35 +478,40 @@ const crearUuid = () => String(Crypto.randomUUID()).toLowerCase();
 const PRUEBAN_ESTADO = ['validacion', 'conflicto', 'no_encontrado'];
 const sigueIncierto = (tipo, previo) => tipo === 'reintentable' || (previo && !PRUEBAN_ESTADO.includes(tipo));
 
-// La lista de derivaciones de la sede es una MEJORA sobre el buscador: con un back anterior (404), sin
-// red, sin sesión o con cualquier falla devuelve [] y la pantalla queda como antes (aviso + buscador).
+// La lista de familias derivadas a la sede (GET dispositivos/{id}/derivaciones/). Devuelve { filas, falla }: una lista
+// vacía es `filas: []` sin falla (solo el buscador); una falla de lectura (5xx, timeout, red, página HTML) es
+// `falla: { mensaje }` para ofrecer «Reintentar». Sin red, sin módulo, 404, sesión vencida o sesión cambiada no son
+// una falla de la lista: la pantalla ya lo dice por su cuenta (banner, 403 del buscador) y queda solo el buscador.
 export const cargarDerivaciones = async (sesion, dispositivoId) => {
   try {
     const payload = await conSesion(sesion, (op) => getDerivacionesDispositivo(dispositivoId, op), { timeoutMs: LIMITES.lecturaMs });
-    return normalizarListaDerivaciones(payload);
-  } catch {
-    return [];
+    return { filas: normalizarListaDerivaciones(payload), falla: null };
+  } catch (error) {
+    const tipo = error?.clasificacion?.tipo;
+    if (tipo === 'reintentable' || tipo === 'rechazo') return { filas: [], falla: { mensaje: TEXTO_REINTENTAR_LECTURA } };
+    return { filas: [], falla: null };
   }
 };
 
-// Al tocar una fila: la derivación completa (GET derivaciones/{id}/), armada como la búsqueda por DNI.
+// Al tocar una fila: la derivación completa (GET derivaciones/{id}/), con la misma forma que la búsqueda por DNI.
 // `identidad_a_revisar` llega siempre null por este camino: es «sin dato», la pantalla no dice nada de eso.
+// `plazas_libres` queda en null: el detalle no lo trae, y el del dispositivo queda viejo tras aceptar una familia.
 // - 200 con la derivación pendiente → { busqueda }.
-// - 404 de «la ruta no existe» (un back anterior: el cuerpo es una página HTML, no el JSON del back) → { busqueda } PARCIAL
-//   armada con la fila, como último recurso.
-// - 404 JSON («No encontrado.»: ya no existe o es de otro alcance) y 409 (ya no está pendiente) salen como error con
-//   `clasificacion` ('no_encontrado' / 'conflicto'); lo demás, también.
-export const cargarDetalleDerivacion = async (sesion, fila, plazasLibres = null) => {
+// - 404 (JSON o página HTML) y 200 que ya no es PENDIENTE → error 'no_encontrado'; 409 → 'conflicto' (con el detail).
+// Todo error sale con `clasificacion`; el de sesión cambiada ('obsoleto') se relanza tal cual.
+export const cargarDetalleDerivacion = async (sesion, fila) => {
   try {
     const payload = await conSesion(sesion, (op) => getDerivacionDetalle(fila.id, op), { timeoutMs: LIMITES.lecturaMs });
     const derivacion = normalizarDerivacion(payload);
     if (!derivacion || derivacion.estado !== 'PENDIENTE') {
       throw crearError('NO_PENDIENTE', TEXTO_NO_DISPONIBLE, { clasificacion: { tipo: 'no_encontrado', mensaje: TEXTO_NO_DISPONIBLE } });
     }
-    return { busqueda: { resultado: 'DERIVACION', dni: '', plazas_libres: plazasLibres, mensaje: '', derivacion } };
+    return { busqueda: { resultado: 'DERIVACION', dni: '', plazas_libres: null, mensaje: '', derivacion } };
   } catch (error) {
-    if (Number(error?.status) === 404 && error?.unexpectedHtml === true) return { busqueda: busquedaDeFila(fila, plazasLibres) };
-    if (error?.clasificacion?.tipo === 'no_encontrado') error.clasificacion.mensaje = TEXTO_NO_DISPONIBLE;
+    if (error?.clasificacion?.tipo === 'obsoleto') throw error;
+    if (Number(error?.status) === 404) {
+      throw Object.assign(error, { clasificacion: { tipo: 'no_encontrado', mensaje: TEXTO_NO_DISPONIBLE } });
+    }
     throw error;
   }
 };

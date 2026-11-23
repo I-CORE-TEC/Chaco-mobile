@@ -208,8 +208,7 @@ const pedirJson = async (path, { method = 'GET', body, token = null, timeoutMs =
   ...(Number(timeoutMs) > 0 ? { timeoutMs: Number(timeoutMs) } : {}),
 });
 
-// §13.2. `dni`: solo dígitos (el back normaliza igual). 429 trae `retryAfter`.
-// Lista de familias derivadas a la sede (pendientes), sin parámetros. Con un back anterior da 404.
+// Lista de familias derivadas a la sede (pendientes), sin parámetros.
 export const getDerivacionesDispositivo = (dispositivoId, opciones = {}) => conVerificacion(
   () => pedirJson(RUTAS.derivacionesDispositivo(dispositivoId), opciones));
 
@@ -217,6 +216,7 @@ export const getDerivacionesDispositivo = (dispositivoId, opciones = {}) => conV
 export const getDerivacionDetalle = (derivacionId, opciones = {}) => conVerificacion(
   () => pedirJson(RUTAS.derivacionDetalle(derivacionId), opciones));
 
+// §13.2. `dni`: solo dígitos (el back normaliza igual). 429 trae `retryAfter`.
 export const buscarFamilia = (dispositivoId, dni, opciones = {}) => conVerificacion(
   () => pedirJson(RUTAS.buscarFamilia(dispositivoId, dni), opciones));
 
