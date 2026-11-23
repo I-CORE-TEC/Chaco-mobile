@@ -315,6 +315,16 @@ export default function EmergenciaApp({ onCambiarModulo }) {
   const verDerivacion = (busqueda) => setPantalla((actual) => ({ ...actual, vista: 'llegadas_derivacion', busqueda, dni: busqueda.dni || actual.dni }));
   // Desde la lista de familias derivadas: no hay DNI (el último buscado era de otra familia, no se arrastra).
   const verDerivacionDeLista = (busqueda) => setPantalla((actual) => ({ ...actual, vista: 'llegadas_derivacion', busqueda, dni: '' }));
+  // La derivación que se tocó en la lista ya no está pendiente (409) o ya no existe (404): se dice y se
+  // vuelve a la lista, que se recarga.
+  const conflictoDeLista = (clasificacion) => {
+    showAlert('El caso cambió', clasificacion.mensaje, [{ text: 'Entendido' }]);
+    verBuscar();
+  };
+  const derivacionNoDisponible = () => {
+    showToast({ type: 'warning', message: 'La derivación ya no está disponible.' });
+    verBuscar();
+  };
   const verIntegrantes = (caso, dni) => setPantalla((actual) => ({
     ...actual, vista: 'llegadas_integrantes', caso, dni: dni ?? actual.dni, n: (actual.n || 0) + 1,
   }));
@@ -495,7 +505,8 @@ export default function EmergenciaApp({ onCambiarModulo }) {
         {pestana === 'inicio' && vista === 'llegadas_buscar' ? (
           <EmergenciaLlegadaBuscarScreen key={`buscar-${pantalla.dispositivo?.id}-${pantalla.n}`} dispositivo={pantalla.dispositivo}
             dniInicial={pantalla.dni} autoBuscar={!!pantalla.autoBuscar} esperaHasta={esperaBuscarHasta} onEspera={setEsperaBuscarHasta}
-            onDerivacion={verDerivacion} onDerivacionDeLista={verDerivacionDeLista} onIntegrantes={verIntegrantes}
+            onDerivacion={verDerivacion} onDerivacionDeLista={verDerivacionDeLista}
+            onConflictoDeLista={conflictoDeLista} onDerivacionNoDisponible={derivacionNoDisponible} onIntegrantes={verIntegrantes}
             onNoEncontrado={llegadaNoEncontrada} onSinModulo={sinModulo} onSinDerivacion={verPuerta} />
         ) : null}
         {pestana === 'inicio' && vista === 'llegadas_derivacion' ? (

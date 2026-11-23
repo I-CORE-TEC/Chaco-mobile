@@ -6,7 +6,7 @@ import CustomButton from '../components/CustomButton';
 import { useTheme } from '../context/ThemeContext';
 import {
   TEXTO_SIN_RED, abrirSesion, buscar, clasificarErrorLlegada, escucharRed, hayConexion, pasoDeBusqueda,
-  accionesSinDerivacion, textoDerivadaAOtroEdificio, PRIORIDADES, busquedaDeFila, cargarDerivaciones, textoDePersonas, tituloDeFamilia,
+  accionesSinDerivacion, textoDerivadaAOtroEdificio, PRIORIDADES, cargarDerivaciones, cargarDetalleDerivacion, textoDePersonas, tituloDeFamilia,
 } from '../services/emergenciaLlegadas';
 import { cleanDigits } from '../utils/dni';
 import { formatDate } from '../utils/dates';
@@ -33,6 +33,7 @@ export const AYUDA_DNI = 'El DNI del responsable o de cualquier persona ya confi
 export default function EmergenciaLlegadaBuscarScreen({
   dispositivo, dniInicial = '', autoBuscar = false, esperaHasta: esperaInicial = 0, onEspera,
   onDerivacion, onIntegrantes, onNoEncontrado, onSinModulo, onSinDerivacion, onDerivacionDeLista,
+  onConflictoDeLista, onDerivacionNoDisponible,
 }) {
   const { theme, typography } = useTheme();
   const [sesion, setSesion] = useState(null);
@@ -46,6 +47,8 @@ export default function EmergenciaLlegadaBuscarScreen({
   const [esperaHasta, setEsperaHasta] = useState(esperaInicial);
   const [ahora, setAhora] = useState(Date.now());
   const [derivaciones, setDerivaciones] = useState([]);
+  const [abriendo, setAbriendo] = useState(null);
+  const [falloAbrir, setFalloAbrir] = useState(null);
   const montado = useRef(true);
   const buscandoRef = useRef(false);
 
@@ -140,6 +143,32 @@ export default function EmergenciaLlegadaBuscarScreen({
     }
   };
 
+  // Tocar una fila: se trae la derivación completa y se abre el mismo flujo de aceptar o rechazar. 409 →
+  // `onConflictoDeLista` (muestra el detail y recarga la lista); 404 → `onDerivacionNoDisponible`.
+  const abrirFila = async (fila) => {
+    if (buscandoRef.current || !sesion) return;
+    buscandoRef.current = true;
+    setAbriendo(fila.id);
+    setFalloAbrir(null);
+    try {
+      const { busqueda } = await cargarDetalleDerivacion(sesion, fila, dispositivo.plazas_libres ?? null);
+      if (!montado.current) return;
+      onDerivacionDeLista?.(busqueda);
+    } catch (e) {
+      if (!montado.current) return;
+      const c = e?.clasificacion || clasificarErrorLlegada(e);
+      if (c.tipo === 'obsoleto') return;
+      if (c.tipo === 'conflicto') onConflictoDeLista?.(c);
+      else if (c.tipo === 'no_encontrado') onDerivacionNoDisponible?.();
+      else if (c.tipo === 'sin_modulo') onSinModulo?.(c.mensaje);
+      else if (c.tipo === 'sin_red') setSinRed(true);
+      else setFalloAbrir({ fila, tipo: c.tipo, mensaje: c.mensaje });
+    } finally {
+      buscandoRef.current = false;
+      if (montado.current) setAbriendo(null);
+    }
+  };
+
   const tocarBuscar = async () => {
     if (buscandoRef.current || !sesion || esperando) return;
     // Se toma antes de mirar la red: dos toques seguidos no pasan los dos.
@@ -204,9 +233,9 @@ export default function EmergenciaLlegadaBuscarScreen({
               ? { backgroundColor: statusTones.warning.bg, borderColor: statusTones.warning.bd }
               : { backgroundColor: theme.colors.surface, borderColor: theme.colors.border };
             return (
-              <Pressable key={String(fila.id)} accessibilityRole="button" disabled={sinRed}
+              <Pressable key={String(fila.id)} accessibilityRole="button" disabled={sinRed || abriendo != null}
                 accessibilityLabel={[tituloDeFamilia(fila), resumen, prioridad, fila.por_vencer ? 'Por vencer' : null, vence, fila.edificio?.nombre].filter(Boolean).join(', ')}
-                onPress={() => onDerivacionDeLista?.(busquedaDeFila(fila, dispositivo.plazas_libres ?? null))}
+                onPress={() => abrirFila(fila)}
                 style={({ pressed }) => [styles.fila, colores, pressed && styles.presionada]}>
                 <View style={styles.cuerpo}>
                   <Text style={[styles.titulo, { color: fila.por_vencer ? statusTones.warning.tx : theme.colors.text, fontFamily: typography.bold }]}>{tituloDeFamilia(fila)}</Text>
@@ -222,6 +251,9 @@ export default function EmergenciaLlegadaBuscarScreen({
               </Pressable>
             );
           })}
+          {abriendo != null ? <ActivityIndicator color={theme.colors.primary} accessibilityLabel="Abriendo la derivación" /> : null}
+          {falloAbrir ? avisoDe(falloAbrir.tipo === 'reintentable' ? 'warning' : 'danger', falloAbrir.mensaje) : null}
+          {falloAbrir ? <CustomButton title="Reintentar" variant="secondary" iconLeft="refresh" onPress={() => abrirFila(falloAbrir.fila)} /> : null}
         </View>
       ) : null}
 
@@ -236,7 +268,7 @@ export default function EmergenciaLlegadaBuscarScreen({
           <Text key={`dni-${indice}`} accessibilityLiveRegion="polite" style={[styles.error, { color: theme.colors.danger, fontFamily: typography.medium }]}>{mensaje}</Text>
         ))}
         <CustomButton title={tituloBoton} size="L" iconLeft="search-outline" loading={buscando}
-          disabled={!sesion || buscando || esperando || sinRed} onPress={tocarBuscar} />
+          disabled={!sesion || buscando || abriendo != null || esperando || sinRed} onPress={tocarBuscar} />
       </View>
 
       {buscando ? <ActivityIndicator color={theme.colors.primary} accessibilityLabel="Buscando a la familia" /> : null}

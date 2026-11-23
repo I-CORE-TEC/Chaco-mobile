@@ -26,6 +26,7 @@ export const RUTAS = {
   entrega: (id) => `${BASE}entregas/${encodeURIComponent(id)}/`,
   recibirEntrega: (id) => `${BASE}entregas/${encodeURIComponent(id)}/recibir/`,
   derivacionesDispositivo: (id) => `${BASE}dispositivos/${encodeURIComponent(id)}/derivaciones/`,
+  derivacionDetalle: (id) => `${BASE}derivaciones/${encodeURIComponent(id)}/`,
   buscarFamilia: (id, dni) => `${BASE}dispositivos/${encodeURIComponent(id)}/buscar/?dni=${encodeURIComponent(dni)}`,
   aceptarDerivacion: (id) => `${BASE}derivaciones/${encodeURIComponent(id)}/aceptar/`,
   rechazarDerivacion: (id) => `${BASE}derivaciones/${encodeURIComponent(id)}/rechazar/`,
@@ -211,6 +212,10 @@ const pedirJson = async (path, { method = 'GET', body, token = null, timeoutMs =
 // Lista de familias derivadas a la sede (pendientes), sin parámetros. Con un back anterior da 404.
 export const getDerivacionesDispositivo = (dispositivoId, opciones = {}) => conVerificacion(
   () => pedirJson(RUTAS.derivacionesDispositivo(dispositivoId), opciones));
+
+// La derivación completa (la misma forma que `derivacion` de buscar por DNI), por su id. 409 si ya no está pendiente.
+export const getDerivacionDetalle = (derivacionId, opciones = {}) => conVerificacion(
+  () => pedirJson(RUTAS.derivacionDetalle(derivacionId), opciones));
 
 export const buscarFamilia = (dispositivoId, dni, opciones = {}) => conVerificacion(
   () => pedirJson(RUTAS.buscarFamilia(dispositivoId, dni), opciones));

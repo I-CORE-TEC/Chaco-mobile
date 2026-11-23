@@ -3,7 +3,7 @@ import * as Crypto from 'expo-crypto';
 import { getBecasToken, getStoredBecasUser } from './becasApi';
 import {
   aceptarDerivacion, agregarIntegrante, alojarFamilia, avisarALaMesa, buscarFamilia, cancelarIngreso, cerrarConDiferencia,
-  completarFichaIntegrante, confirmarIntegrante, errorObsoleto, esConflictoDeEstado, esUuidEnUso, getDerivacionesDispositivo, getIntegrante, getIntegrantes,
+  completarFichaIntegrante, confirmarIntegrante, errorObsoleto, esConflictoDeEstado, esUuidEnUso, getDerivacionDetalle, getDerivacionesDispositivo, getIntegrante, getIntegrantes,
   getPlazas, idDeDerivacion, ingresoDirecto, quitarIntegrante, rechazarDerivacion,
 } from './emergenciaApi';
 import { esSinModulo } from './sinModulo';
@@ -39,6 +39,7 @@ export const TEXTO_ACEPTAR_INCIERTO = 'No se pudo confirmar si la derivación se
 export const TEXTO_RECHAZAR_INCIERTO = 'No se pudo confirmar si el rechazo llegó. «Reintentar» lo vuelve a mandar: si ya había llegado, el caso figura de vuelta en la mesa.';
 export const TEXTO_AGREGAR_INCIERTO = 'No se pudo confirmar si se sumó la persona. «Reintentar» manda el mismo pedido y no la suma dos veces.';
 export const TEXTO_NO_ENCONTRADO = 'Esto ya no está disponible para vos. Se vuelve a cargar la lista de tus dispositivos.';
+export const TEXTO_NO_DISPONIBLE = 'La derivación ya no está disponible.';
 export const TEXTO_SESION = 'La sesión venció: volvé a entrar.';
 export const TEXTO_ACEPTADA_ANTES = 'La derivación ya figura aceptada: seguís con los integrantes.';
 export const TEXTO_RECHAZADA_ANTES = 'La derivación ya no está pendiente: el caso figura de vuelta en la mesa.';
@@ -515,6 +516,28 @@ export const cargarDerivaciones = async (sesion, dispositivoId) => {
     return normalizarListaDerivaciones(payload);
   } catch {
     return [];
+  }
+};
+
+// Al tocar una fila: la derivación completa (GET derivaciones/{id}/), armada como la búsqueda por DNI.
+// `identidad_a_revisar` llega siempre null por este camino: es «sin dato», la pantalla no dice nada de eso.
+// - 200 con la derivación pendiente → { busqueda }.
+// - 404 de «la ruta no existe» (un back anterior: el cuerpo es una página HTML, no el JSON del back) → { busqueda } PARCIAL
+//   armada con la fila, como último recurso.
+// - 404 JSON («No encontrado.»: ya no existe o es de otro alcance) y 409 (ya no está pendiente) salen como error con
+//   `clasificacion` ('no_encontrado' / 'conflicto'); lo demás, también.
+export const cargarDetalleDerivacion = async (sesion, fila, plazasLibres = null) => {
+  try {
+    const payload = await conSesion(sesion, (op) => getDerivacionDetalle(fila.id, op), { timeoutMs: LIMITES.lecturaMs });
+    const derivacion = normalizarDerivacion(payload);
+    if (!derivacion || derivacion.estado !== 'PENDIENTE') {
+      throw crearError('NO_PENDIENTE', TEXTO_NO_DISPONIBLE, { clasificacion: { tipo: 'no_encontrado', mensaje: TEXTO_NO_DISPONIBLE } });
+    }
+    return { busqueda: { resultado: 'DERIVACION', dni: '', plazas_libres: plazasLibres, mensaje: '', derivacion } };
+  } catch (error) {
+    if (Number(error?.status) === 404 && error?.unexpectedHtml === true) return { busqueda: busquedaDeFila(fila, plazasLibres) };
+    if (error?.clasificacion?.tipo === 'no_encontrado') error.clasificacion.mensaje = TEXTO_NO_DISPONIBLE;
+    throw error;
   }
 };
 
