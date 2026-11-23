@@ -1,12 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator, Platform } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import TextInput from '../components/FormInput';
 import CustomButton from '../components/CustomButton';
 import { useTheme } from '../context/ThemeContext';
 import {
   TEXTO_SIN_RED, abrirSesion, buscar, clasificarErrorLlegada, escucharRed, hayConexion, pasoDeBusqueda,
-  accionesSinDerivacion, textoDerivadaAOtroEdificio,
+  accionesSinDerivacion, textoDerivadaAOtroEdificio, PRIORIDADES, busquedaDeFila, cargarDerivaciones, textoDePersonas, tituloDeFamilia,
 } from '../services/emergenciaLlegadas';
 import { cleanDigits } from '../utils/dni';
 import { formatDate } from '../utils/dates';
@@ -16,6 +16,7 @@ import { fontSizes, radii } from '../theme';
 
 export const TITULO_BUSCAR = 'Buscar a la familia';
 export const TEXTO_SIN_ACCIONES = 'Tu usuario no puede ingresar a la familia ni avisar a la mesa desde este dispositivo. Consultá con quien administra tu acceso.';
+export const TITULO_DERIVACIONES = 'Derivaciones por aceptar';
 export const AYUDA_DNI = 'El DNI del responsable o de cualquier persona ya confirmada de la familia.';
 
 // M2-1 · Buscar a la familia por DNI (§13.2) en un dispositivo. Con conexión: sin red se bloquea con
@@ -31,7 +32,7 @@ export const AYUDA_DNI = 'El DNI del responsable o de cualquier persona ya confi
 // sobrevive a volver y re-entrar (el tope es del usuario, no de la pantalla).
 export default function EmergenciaLlegadaBuscarScreen({
   dispositivo, dniInicial = '', autoBuscar = false, esperaHasta: esperaInicial = 0, onEspera,
-  onDerivacion, onIntegrantes, onNoEncontrado, onSinModulo, onSinDerivacion,
+  onDerivacion, onIntegrantes, onNoEncontrado, onSinModulo, onSinDerivacion, onDerivacionDeLista,
 }) {
   const { theme, typography } = useTheme();
   const [sesion, setSesion] = useState(null);
@@ -44,6 +45,7 @@ export default function EmergenciaLlegadaBuscarScreen({
   const [sinRed, setSinRed] = useState(false);
   const [esperaHasta, setEsperaHasta] = useState(esperaInicial);
   const [ahora, setAhora] = useState(Date.now());
+  const [derivaciones, setDerivaciones] = useState([]);
   const montado = useRef(true);
   const buscandoRef = useRef(false);
 
@@ -66,6 +68,15 @@ export default function EmergenciaLlegadaBuscarScreen({
       dejarDeEscuchar();
     };
   }, [dispositivo?.id]);
+
+  // La lista de familias derivadas a la sede, antes del buscador. Es una mejora: si el back no la tiene (404),
+  // no hay red o falla, queda vacía y la pantalla es la de siempre. Se vuelve a pedir al volver la red.
+  useEffect(() => {
+    if (!sesion || sinRed) return;
+    let vigente = true;
+    cargarDerivaciones(sesion, dispositivo.id).then((filas) => { if (vigente && montado.current) setDerivaciones(filas); });
+    return () => { vigente = false; };
+  }, [sesion, sinRed, dispositivo?.id]);
 
   const esperando = esperaHasta > ahora;
   useEffect(() => {
@@ -182,6 +193,38 @@ export default function EmergenciaLlegadaBuscarScreen({
       keyboardDismissMode={keyboardDismissModeFor(Platform.OS === 'ios' ? 'interactive' : 'on-drag')}>
       {sinRed ? avisoDe('warning', TEXTO_SIN_RED, 'cloud-offline-outline') : null}
 
+      {derivaciones.length ? (
+        <View style={styles.lista}>
+          <Text accessibilityRole="header" style={[styles.titulo, { color: theme.colors.text, fontFamily: typography.bold }]}>{TITULO_DERIVACIONES}</Text>
+          {derivaciones.map((fila) => {
+            const [prioridad, tono] = PRIORIDADES[fila.prioridad] || [null, 'gray'];
+            const vence = fila.vence_en ? `Vence ${formatDate(fila.vence_en, { includeTime: true })}` : null;
+            const resumen = [textoDePersonas(fila.personas), fila.caso_numero ? `Caso ${fila.caso_numero}` : null].filter(Boolean).join(' · ');
+            const colores = fila.por_vencer
+              ? { backgroundColor: statusTones.warning.bg, borderColor: statusTones.warning.bd }
+              : { backgroundColor: theme.colors.surface, borderColor: theme.colors.border };
+            return (
+              <Pressable key={String(fila.id)} accessibilityRole="button" disabled={sinRed}
+                accessibilityLabel={[tituloDeFamilia(fila), resumen, prioridad, fila.por_vencer ? 'Por vencer' : null, vence, fila.edificio?.nombre].filter(Boolean).join(', ')}
+                onPress={() => onDerivacionDeLista?.(busquedaDeFila(fila, dispositivo.plazas_libres ?? null))}
+                style={({ pressed }) => [styles.fila, colores, pressed && styles.presionada]}>
+                <View style={styles.cuerpo}>
+                  <Text style={[styles.titulo, { color: fila.por_vencer ? statusTones.warning.tx : theme.colors.text, fontFamily: typography.bold }]}>{tituloDeFamilia(fila)}</Text>
+                  <Text style={[styles.texto, { color: fila.por_vencer ? statusTones.warning.tx : theme.colors.text, fontFamily: typography.medium }]}>{resumen}</Text>
+                  <View style={styles.insignias}>
+                    {prioridad ? insignia(tono, prioridad) : null}
+                    {fila.por_vencer ? insignia('warning', 'Por vencer') : null}
+                  </View>
+                  {vence ? <Text style={[styles.ayuda, { color: fila.por_vencer ? statusTones.warning.tx : theme.colors.textMuted, fontFamily: typography.medium }]}>{vence}</Text> : null}
+                  {fila.edificio ? <Text style={[styles.ayuda, { color: fila.por_vencer ? statusTones.warning.tx : theme.colors.textMuted, fontFamily: typography.medium }]}>{`Edificio ${fila.edificio.nombre}`}</Text> : null}
+                </View>
+                <Ionicons name="chevron-forward" size={20} color={theme.colors.textSoft} accessible={false} importantForAccessibility="no" />
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : null}
+
       <View style={tarjeta}>
         <Text accessibilityRole="header" style={[styles.titulo, { color: theme.colors.text, fontFamily: typography.bold }]}>{TITULO_BUSCAR}</Text>
         <Text style={ayuda}>{AYUDA_DNI}</Text>
@@ -243,6 +286,11 @@ const styles = StyleSheet.create({
   texto: { fontSize: fontSizes.sm },
   error: { fontSize: fontSizes.xs },
   flex: { flex: 1 },
+  cuerpo: { flex: 1, gap: 2 },
+  lista: { gap: 10 },
+  fila: { flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, borderRadius: radii.xl, padding: 14, minHeight: 64 },
+  presionada: { opacity: 0.7, transform: [{ scale: 0.98 }] },
+  insignias: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginVertical: 2 },
   input: { minHeight: 46, borderWidth: 1, borderRadius: radii.lg, paddingHorizontal: 12, paddingVertical: 10, fontSize: fontSizes.base },
   aviso: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: radii.lg, padding: 10 },
   insignia: { alignSelf: 'flex-start', borderWidth: 1, borderRadius: radii.full, paddingHorizontal: 10, paddingVertical: 3 },

@@ -7,16 +7,15 @@ import { useTheme } from '../context/ThemeContext';
 import { useToast } from '../context/ToastContext';
 import {
   MAX_OBSERVACION, MOTIVOS_RECHAZO, TEXTO_SIN_RED, abrirSesion, aceptar, clasificarErrorLlegada, escucharRed, hayConexion,
-  nombreDelResponsable, rechazar, resumenDeAsistencia, resumenDelGrupo, textoIdentidadARevisar, tituloDeNecesidad, validarRechazo,
+  PRIORIDADES, nombreDelResponsable, rechazar, resumenDeAsistencia, resumenDelGrupo, textoIdentidadARevisar, tituloDeNecesidad, validarRechazo,
 } from '../services/emergenciaLlegadas';
 import { formatDate } from '../utils/dates';
 import { statusTones } from '../theme/statusBadges';
 import { keyboardDismissModeFor } from '../utils/teclado';
 import { fontSizes, radii } from '../theme';
 
+export const TEXTO_DATOS_PARCIALES = 'Abriste la derivación desde la lista: acá no se muestran la composición de la familia, las necesidades ni el teléfono.';
 export const TEXTO_VENCIDA = 'Venció el plazo, pero la mesa todavía no la cerró: se puede aceptar igual.';
-
-const PRIORIDADES = { ALTA: ['Prioridad alta', 'danger'], MEDIA: ['Prioridad media', 'warning'], BAJA: ['Prioridad baja', 'gray'] };
 
 // M2-2 · La derivación pendiente (§13.3, §13.4): la familia, lo que pidió la mesa, y «Aceptar» o
 // «Rechazar» con motivo. Con conexión: sin red no se manda nada. El token se fija al abrir.
@@ -220,17 +219,20 @@ export default function EmergenciaDerivacionScreen({
           {insignia('warning', 'Por aceptar', 'estado')}
           {prioridad ? insignia(tonoPrioridad, prioridad, 'prioridad') : null}
           {derivacion.vencida ? insignia('danger', 'Vencida', 'vencida') : null}
+          {derivacion.por_vencer && !derivacion.vencida ? insignia('warning', 'Por vencer', 'por_vencer') : null}
         </View>
         {derivacion.vencida ? avisoDe('warning', TEXTO_VENCIDA, 'time-outline') : null}
         {dato('Responsable', nombreDelResponsable(derivacion.responsable))}
         {derivacion.responsable?.identidad_a_revisar ? avisoDe('warning', textoIdentidadARevisar(derivacion.responsable.identidad_a_revisar), 'alert-circle-outline') : null}
         {dato('Edificio', derivacion.edificio?.nombre)}
-        {dato('Camas pedidas', `${derivacion.plazas_pedidas}${caso?.total_declarado ? ` · ${caso.total_declarado} personas declaradas` : ''}`)}
+        {derivacion.parcial ? dato('Personas', derivacion.personas ? String(derivacion.personas) : null)
+          : dato('Camas pedidas', `${derivacion.plazas_pedidas}${caso?.total_declarado ? ` · ${caso.total_declarado} personas declaradas` : ''}`)}
         {libres != null ? <Text style={ayuda}>{libres === 1 ? '1 cama libre en este dispositivo' : `${libres || 'Sin'} camas libres en este dispositivo`}</Text> : null}
         {dato('Derivada', [derivacion.derivada_por, derivacion.derivada_en ? formatDate(derivacion.derivada_en, { includeTime: true }) : null].filter(Boolean).join(' · '))}
         {dato('Vence', derivacion.vence_en ? formatDate(derivacion.vence_en, { includeTime: true }) : null)}
       </View>
 
+      {derivacion.parcial ? avisoDe('info', TEXTO_DATOS_PARCIALES, 'information-circle-outline') : (
       <View style={tarjeta}>
         <Text accessibilityRole="header" style={[styles.titulo, { color: theme.colors.text, fontFamily: typography.bold }]}>La familia</Text>
         <Text style={[styles.texto, { color: theme.colors.text, fontFamily: typography.medium }]}>{resumenDelGrupo(derivacion.grupo)}</Text>
@@ -241,6 +243,7 @@ export default function EmergenciaDerivacionScreen({
         {dato('Teléfono', derivacion.telefono)}
         {dato('Observaciones', derivacion.observaciones)}
       </View>
+      )}
 
       {falla ? avisoDe(falla.tipo === 'reintentable' ? 'warning' : 'danger', falla.mensaje) : null}
       {enviando ? <ActivityIndicator color={theme.colors.primary} accessibilityLabel={enviando === 'aceptar' ? 'Aceptando la derivación' : 'Rechazando la derivación'} /> : null}

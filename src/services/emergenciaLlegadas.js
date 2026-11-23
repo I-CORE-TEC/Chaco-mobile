@@ -3,7 +3,7 @@ import * as Crypto from 'expo-crypto';
 import { getBecasToken, getStoredBecasUser } from './becasApi';
 import {
   aceptarDerivacion, agregarIntegrante, alojarFamilia, avisarALaMesa, buscarFamilia, cancelarIngreso, cerrarConDiferencia,
-  completarFichaIntegrante, confirmarIntegrante, errorObsoleto, esConflictoDeEstado, esUuidEnUso, getIntegrante, getIntegrantes,
+  completarFichaIntegrante, confirmarIntegrante, errorObsoleto, esConflictoDeEstado, esUuidEnUso, getDerivacionesDispositivo, getIntegrante, getIntegrantes,
   getPlazas, idDeDerivacion, ingresoDirecto, quitarIntegrante, rechazarDerivacion,
 } from './emergenciaApi';
 import { esSinModulo } from './sinModulo';
@@ -168,6 +168,55 @@ export const normalizarBusqueda = (payload) => {
     edificio_derivado: normalizarEdificio(datos.edificio_derivado),
   };
 };
+
+// Lista de familias derivadas a la sede (GET dispositivos/{id}/derivaciones/): una lista simple, ya ordenada
+// por vencimiento. Una fila sin `id` se descarta; cualquier otra cosa que no sea lista es lista vacía.
+export const PRIORIDADES = { ALTA: ['Prioridad alta', 'danger'], MEDIA: ['Prioridad media', 'warning'], BAJA: ['Prioridad baja', 'gray'] };
+export const normalizarListaDerivaciones = (payload) => (Array.isArray(payload) ? payload : [])
+  .filter((fila) => fila && typeof fila === 'object' && fila.id != null)
+  .map((fila) => ({
+    id: fila.id,
+    apellido: textoPlano(fila.apellido).trim(),
+    personas: entero(fila.personas),
+    caso_numero: textoPlano(fila.caso_numero),
+    prioridad: textoPlano(fila.prioridad),
+    vence_en: fila.vence_en || null,
+    por_vencer: fila.por_vencer === true,
+    edificio: normalizarEdificio(fila.edificio),
+  }));
+
+export const tituloDeFamilia = (fila) => (fila?.apellido ? `Familia ${fila.apellido}` : 'Familia sin apellido');
+export const textoDePersonas = (n) => (n === 1 ? '1 persona' : `${n} personas`);
+
+// La pantalla de aceptar/rechazar se arma con una búsqueda por DNI; la fila trae menos datos. Esto arma la
+// misma forma con lo que hay (`parcial: true`) para entrar al MISMO flujo con el `id` de la fila. Lo que la
+// fila no trae (nombre y DNI del responsable, camas pedidas, quién derivó, composición, necesidades,
+// teléfono, observaciones) queda vacío y la pantalla lo oculta. `caso.id` es null: el servidor lo devuelve al aceptar.
+export const busquedaDeFila = (fila, plazasLibres = null) => ({
+  resultado: 'DERIVACION',
+  dni: '',
+  plazas_libres: plazasLibres,
+  mensaje: '',
+  derivacion: {
+    id: fila.id,
+    estado: 'PENDIENTE',
+    parcial: true,
+    personas: fila.personas,
+    plazas_pedidas: null,
+    vence_en: fila.vence_en,
+    vencida: false,
+    por_vencer: fila.por_vencer,
+    derivada_en: null,
+    derivada_por: '',
+    caso: { id: null, numero: fila.caso_numero, estado: 'DERIVADO', prioridad: fila.prioridad, total_declarado: fila.personas },
+    responsable: { nombre: '', apellido: fila.apellido, dni: '', identidad_a_revisar: null },
+    grupo: {},
+    necesidades: [],
+    telefono: '',
+    observaciones: '',
+    edificio: fila.edificio,
+  },
+});
 
 // Qué botones de M2-6 ofrece una búsqueda SIN_DERIVACION (§13.2): el back dice el alcance; la app solo
 // suma las camas. Con un back que no manda las banderas (`null`) se ofrecen como antes.
@@ -457,6 +506,17 @@ const crearUuid = () => String(Crypto.randomUUID()).toLowerCase();
 // anterior: queda como estaba.
 const PRUEBAN_ESTADO = ['validacion', 'conflicto', 'no_encontrado'];
 const sigueIncierto = (tipo, previo) => tipo === 'reintentable' || (previo && !PRUEBAN_ESTADO.includes(tipo));
+
+// La lista de derivaciones de la sede es una MEJORA sobre el buscador: con un back anterior (404), sin
+// red, sin sesión o con cualquier falla devuelve [] y la pantalla queda como antes (aviso + buscador).
+export const cargarDerivaciones = async (sesion, dispositivoId) => {
+  try {
+    const payload = await conSesion(sesion, (op) => getDerivacionesDispositivo(dispositivoId, op), { timeoutMs: LIMITES.lecturaMs });
+    return normalizarListaDerivaciones(payload);
+  } catch {
+    return [];
+  }
+};
 
 // §13.3. Aceptar NO es idempotente. `incierto`: un intento anterior de esta pantalla salió sin que se
 // supiera si llegó. Devuelve:

@@ -25,6 +25,7 @@ export const RUTAS = {
   entregasDispositivo: (id) => `${BASE}dispositivos/${encodeURIComponent(id)}/entregas/`,
   entrega: (id) => `${BASE}entregas/${encodeURIComponent(id)}/`,
   recibirEntrega: (id) => `${BASE}entregas/${encodeURIComponent(id)}/recibir/`,
+  derivacionesDispositivo: (id) => `${BASE}dispositivos/${encodeURIComponent(id)}/derivaciones/`,
   buscarFamilia: (id, dni) => `${BASE}dispositivos/${encodeURIComponent(id)}/buscar/?dni=${encodeURIComponent(dni)}`,
   aceptarDerivacion: (id) => `${BASE}derivaciones/${encodeURIComponent(id)}/aceptar/`,
   rechazarDerivacion: (id) => `${BASE}derivaciones/${encodeURIComponent(id)}/rechazar/`,
@@ -207,6 +208,10 @@ const pedirJson = async (path, { method = 'GET', body, token = null, timeoutMs =
 });
 
 // §13.2. `dni`: solo dígitos (el back normaliza igual). 429 trae `retryAfter`.
+// Lista de familias derivadas a la sede (pendientes), sin parámetros. Con un back anterior da 404.
+export const getDerivacionesDispositivo = (dispositivoId, opciones = {}) => conVerificacion(
+  () => pedirJson(RUTAS.derivacionesDispositivo(dispositivoId), opciones));
+
 export const buscarFamilia = (dispositivoId, dni, opciones = {}) => conVerificacion(
   () => pedirJson(RUTAS.buscarFamilia(dispositivoId, dni), opciones));
 

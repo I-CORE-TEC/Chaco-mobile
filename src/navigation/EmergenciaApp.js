@@ -313,6 +313,8 @@ export default function EmergenciaApp({ onCambiarModulo }) {
   }));
   const elegirDispositivoLlegadas = (dispositivo, { unico = false } = {}) => setPantalla({ vista: 'llegadas_buscar', dispositivo, unico, dni: '', n: 1 });
   const verDerivacion = (busqueda) => setPantalla((actual) => ({ ...actual, vista: 'llegadas_derivacion', busqueda, dni: busqueda.dni || actual.dni }));
+  // Desde la lista de familias derivadas: no hay DNI (el último buscado era de otra familia, no se arrastra).
+  const verDerivacionDeLista = (busqueda) => setPantalla((actual) => ({ ...actual, vista: 'llegadas_derivacion', busqueda, dni: '' }));
   const verIntegrantes = (caso, dni) => setPantalla((actual) => ({
     ...actual, vista: 'llegadas_integrantes', caso, dni: dni ?? actual.dni, n: (actual.n || 0) + 1,
   }));
@@ -385,7 +387,7 @@ export default function EmergenciaApp({ onCambiarModulo }) {
       const base = { dispositivo: actual.dispositivo, unico: actual.unico, dni: actual.dni || '', n: (actual.n || 0) + 1 };
       // El bucle con un caso CERRADO/ALOJADO sin ingreso aceptado lo corta la pantalla de integrantes: un
       // 409 de su propio GET nunca vuelve a mandar acá con destino integrantes.
-      if (clasificacion.destino === 'integrantes' && caso) return { ...base, vista: 'llegadas_integrantes', caso };
+      if (clasificacion.destino === 'integrantes' && caso?.id != null) return { ...base, vista: 'llegadas_integrantes', caso };
       if (clasificacion.destino === 'derivacion' && base.dni) return { ...base, vista: 'llegadas_buscar', autoBuscar: true };
       return { ...base, vista: 'llegadas_buscar', autoBuscar: false };
     });
@@ -493,12 +495,12 @@ export default function EmergenciaApp({ onCambiarModulo }) {
         {pestana === 'inicio' && vista === 'llegadas_buscar' ? (
           <EmergenciaLlegadaBuscarScreen key={`buscar-${pantalla.dispositivo?.id}-${pantalla.n}`} dispositivo={pantalla.dispositivo}
             dniInicial={pantalla.dni} autoBuscar={!!pantalla.autoBuscar} esperaHasta={esperaBuscarHasta} onEspera={setEsperaBuscarHasta}
-            onDerivacion={verDerivacion} onIntegrantes={verIntegrantes}
+            onDerivacion={verDerivacion} onDerivacionDeLista={verDerivacionDeLista} onIntegrantes={verIntegrantes}
             onNoEncontrado={llegadaNoEncontrada} onSinModulo={sinModulo} onSinDerivacion={verPuerta} />
         ) : null}
         {pestana === 'inicio' && vista === 'llegadas_derivacion' ? (
           <EmergenciaDerivacionScreen key={`derivacion-${pantalla.busqueda?.derivacion?.id}`} busqueda={pantalla.busqueda}
-            onAceptada={(caso) => { setEnviando(false); verIntegrantes(caso); }}
+            onAceptada={(caso) => { setEnviando(false); if (caso?.id != null) verIntegrantes(caso); else verBuscar(); }}
             onRechazada={() => { setEnviando(false); verBuscar(); }}
             onConflicto={recargarPorEstado} onNoEncontrado={llegadaNoEncontrada} onSinModulo={sinModulo} onEnviando={setEnviando} />
         ) : null}
