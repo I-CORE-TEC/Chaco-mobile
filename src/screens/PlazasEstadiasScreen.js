@@ -19,10 +19,12 @@ export const SIN_ESTADIAS = { activa: 'No hay personas alojadas con estos filtro
 // cambia cuando hay que volver a pedir la primera página (tras una acción, o con el sincronizar del Banner).
 export default function PlazasEstadiasScreen({
   dispositivoId, edificioId, sectores = [], total = null, onVerCamas, abrirAccion, onNoEncontrado, onSinModulo, recarga = 0,
+  estadoInicial = 'activa', sectorInicial = null, onFiltros,
 }) {
   const { theme, typography } = useTheme();
-  const [estado, setEstado] = useState('activa');
-  const [sector, setSector] = useState(null);
+  const [estado, setEstado] = useState(estadoInicial === 'egresada' ? 'egresada' : 'activa');
+  const [sector, setSector] = useState(sectorInicial ?? null);
+  useEffect(() => { onFiltros?.({ estado, sector }); }, [estado, sector]);
   const [estadias, setEstadias] = useState([]);
   const [pagina, setPagina] = useState(null);
   const [error, setError] = useState(null);

@@ -26,7 +26,7 @@ import PlazasEstadiasScreen from '../screens/PlazasEstadiasScreen';
 import PlazasEgresoScreen from '../screens/PlazasEgresoScreen';
 import PlazasCambioCamaScreen from '../screens/PlazasCambioCamaScreen';
 import PlazaAccionSheet from '../screens/PlazaAccionSheet';
-import { normalizarMapa } from '../services/plazasApi';
+import { getMapa, normalizarMapa } from '../services/plazasApi';
 import {
   descartar, getBorradorEnCurso, getLocalidadesGuardadas, getPendingCount, getResumenPendientes, reintentar, syncPendientes,
 } from '../services/emergenciaCola';
@@ -120,6 +120,7 @@ export default function EmergenciaApp({ onCambiarModulo }) {
   const [pantalla, setPantalla] = useState({ vista: 'inicio', uuid: null });
   const [recarga, setRecarga] = useState(0);
   const [plazasMapa, setPlazasMapa] = useState(null);
+  const edificioActual = useRef(null); // el edificio abierto AHORA (las respuestas tardías lo comparan)
   const [cargandoPerfil, setCargandoPerfil] = useState(false);
   const [sincronizando, setSincronizando] = useState(false);
   const [pendientes, setPendientes] = useState(0);
@@ -333,6 +334,7 @@ export default function EmergenciaApp({ onCambiarModulo }) {
   // el cambio de cama y las demás la hoja de la cama. Al terminar, `onListo(mapa)` repinta (si el mapa es de este
   // edificio), sube `recarga` y vuelve a la vista de origen; `onCancelar` solo vuelve.
   // Con UN solo edificio se entra directo al mapa (`unico`), y Atrás desde ese mapa va al inicio.
+  edificioActual.current = pantalla.edificio || null;
   const elegirEdificio = (item, { unico = false } = {}) => {
     setPlazasMapa(null);
     setPantalla({
@@ -346,6 +348,7 @@ export default function EmergenciaApp({ onCambiarModulo }) {
     && String(mapa.dispositivo.id) === String(pantalla.edificio?.dispositivoId);
   // El mapa que trae la propia pantalla del mapa: solo si es del edificio abierto (nunca pide otra vuelta: sería un bucle).
   const actualizarMapaPlazas = (mapa) => { if (esDelEdificioActual(mapa)) setPlazasMapa(mapa); };
+  const guardarFiltrosEstadias = (filtros) => setPantalla((actual) => ({ ...actual, filtrosEstadias: filtros }));
   const verMapaPlazas = () => setPantalla((actual) => ({ ...actual, vista: 'plazas_mapa' }));
   const verEstadiasPlazas = () => setPantalla((actual) => ({ ...actual, vista: 'plazas_estadias' }));
   const verEdificiosPlazas = ({ sinEntrarDirecto = false } = {}) => setPantalla({ vista: 'plazas_edificios', sinEntrarDirecto });
@@ -355,7 +358,11 @@ export default function EmergenciaApp({ onCambiarModulo }) {
   };
   const abrirAccionPlazas = (accion, { plaza = null, estadia = null } = {}) => {
     const tipo = accion === 'egresar' ? 'egreso' : accion === 'reubicar' ? 'cambio' : 'hoja';
-    setPantalla((actual) => ({ ...actual, vista: 'plazas_accion', accion: { tipo, plaza, estadia, origen: actual.vista } }));
+    // Una sola apertura: un segundo toque (o la acción de otra vista) no pisa la que ya está abierta.
+    setPantalla((actual) => {
+      if (actual.vista === 'plazas_accion') return actual;
+      return { ...actual, vista: 'plazas_accion', accion: { tipo, plaza, estadia, modo: accion, origen: actual.vista } };
+    });
   };
   const volverDeAccionPlazas = () => {
     setEnviando(false);
@@ -365,9 +372,20 @@ export default function EmergenciaApp({ onCambiarModulo }) {
   // (cambiar de cama puede devolver el de otro, o null): si no, queda el anterior y la vista de origen lo vuelve
   // a pedir. `recarga` también refresca las estadías.
   const terminarAccionPlazas = (mapa) => {
+    let aceptado = false;
     if (mapa) {
       const nuevo = normalizarMapa(mapa);
-      if (esDelEdificioActual(nuevo)) setPlazasMapa(nuevo);
+      if (esDelEdificioActual(nuevo)) { setPlazasMapa(nuevo); aceptado = true; }
+    }
+    // Desde estadías, la solapa «Estadías · N» sale del mapa: si no hay uno válido se vuelve a pedir el del edificio.
+    if (!aceptado && pantalla.accion?.origen === 'plazas_estadias' && pantalla.edificio) {
+      const { dispositivoId, edificioId } = pantalla.edificio;
+      getMapa(dispositivoId, edificioId).then((pedido) => {
+        const nuevo = normalizarMapa(pedido);
+        const edificio = edificioActual.current;
+        if (String(nuevo.dispositivo.id) === String(dispositivoId) && String(nuevo.edificio.id) === String(edificioId)
+          && String(edificio?.dispositivoId) === String(dispositivoId) && String(edificio?.edificioId) === String(edificioId)) setPlazasMapa(nuevo);
+      }).catch(() => {});
     }
     setRecarga((valor) => valor + 1);
     volverDeAccionPlazas();
@@ -631,14 +649,15 @@ export default function EmergenciaApp({ onCambiarModulo }) {
           <PlazasEstadiasScreen key={`estadias-${pantalla.edificio?.dispositivoId}-${pantalla.edificio?.edificioId}`}
             dispositivoId={pantalla.edificio?.dispositivoId} edificioId={pantalla.edificio?.edificioId}
             sectores={plazasMapa?.sectores || []} total={plazasMapa?.resumen?.ocupadas ?? null} onVerCamas={verMapaPlazas}
+            estadoInicial={pantalla.filtrosEstadias?.estado} sectorInicial={pantalla.filtrosEstadias?.sector} onFiltros={guardarFiltrosEstadias}
             abrirAccion={abrirAccionPlazas} recarga={recarga} onNoEncontrado={edificioNoEncontrado} onSinModulo={sinModulo} />
         ) : null}
         {pestana === 'inicio' && vista === 'plazas_accion' ? (() => {
-          const { tipo, plaza, estadia } = pantalla.accion || {};
+          const { tipo, plaza, estadia, modo } = pantalla.accion || {};
           const Pantalla = tipo === 'egreso' ? PlazasEgresoScreen : tipo === 'cambio' ? PlazasCambioCamaScreen : PlazaAccionSheet;
           return (
             <Pantalla key={`accion-${tipo}-${plaza?.id ?? estadia?.id}`}
-              dispositivoId={pantalla.edificio?.dispositivoId} edificioId={pantalla.edificio?.edificioId} plaza={plaza} estadia={estadia}
+              dispositivoId={pantalla.edificio?.dispositivoId} edificioId={pantalla.edificio?.edificioId} plaza={plaza} estadia={estadia} modoInicial={modo}
               onListo={terminarAccionPlazas} onCancelar={volverDeAccionPlazas}
               onEnviando={setEnviando} onCambios={marcarCambios('plazas_accion')} />
           );

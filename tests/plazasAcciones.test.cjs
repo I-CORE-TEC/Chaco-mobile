@@ -373,11 +373,11 @@ test('Cambio de cama: sin conexión no manda', async () => {
 
 // ---- Hoja de acciones de la cama ----
 
-async function montarHoja(plaza, rutas = () => response(200, {ok: true, mapa: MAPA})) {
+async function montarHoja(plaza, rutas = () => response(200, {ok: true, mapa: MAPA}), extra = {}) {
   const env = await entorno(rutas);
   const listos = [];
   const Screen = loadScreen('src/screens/PlazaAccionSheet.js', env.mocks);
-  const ui = await render(Screen, {dispositivoId: 7, edificioId: 3, plaza, onListo: m => listos.push(plano(m)), onCancelar: () => {}});
+  const ui = await render(Screen, {dispositivoId: 7, edificioId: 3, plaza, onListo: m => listos.push(plano(m)), onCancelar: () => {}, ...extra});
   return {...env, ...ui, listos};
 }
 const LIBRE = {id: 41, codigo: 'A2-03', tipo: 'CAMA', estado: 'disponible', persona: null, estadia_id: null, reserva_id: null, desde: null, hasta: null,
@@ -568,4 +568,20 @@ test('Cambio de cama: sin cama actual (asignación) el motivo es opcional; con c
     assert.equal(post.body.plaza_id, 45);
     assert.deepEqual(ui.listos, [MAPA]);
   } finally { await ui.close(); }
+});
+
+test('Hoja: modoInicial abre en la acción tocada solo si la cama la permite', async () => {
+  const prestar = await montarHoja(LIBRE, undefined, {modoInicial: 'prestar'});
+  try {
+    assert.ok(prestar.labels().includes('Hasta * (DD/MM/AAAA)'), 'abre en Prestar, no en Reservar');
+    assert.ok(prestar.tree.root.findAllByType('Pressable').find(n => n.props.accessibilityLabel === 'Prestar').props.accessibilityState.selected);
+  } finally { await prestar.close(); }
+  const sinPermiso = await montarHoja({...LIBRE, acciones: ['reservar']}, undefined, {modoInicial: 'prestar'});
+  try {
+    assert.ok(!sinPermiso.labels().includes('Hasta * (DD/MM/AAAA)'), 'prestar no está permitido: queda Reservar');
+  } finally { await sinPermiso.close(); }
+  const fuera = await montarHoja(LIBRE, undefined, {modoInicial: 'fuera_servicio'});
+  try {
+    assert.ok(fuera.input('Motivo para sacar de servicio'), 'abre directo en el formulario de sacar de servicio');
+  } finally { await fuera.close(); }
 });

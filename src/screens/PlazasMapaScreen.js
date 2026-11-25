@@ -113,6 +113,7 @@ export default function PlazasMapaScreen({
     const tono = statusTones[estado.tono];
     const filas = detalleDeCama(plaza, delSector);
     const acciones = typeof abrirAccion === 'function' ? accionesDePlaza(plaza) : [];
+    const bloqueo = typeof plaza.bloqueo === 'string' ? plaza.bloqueo.trim() : '';
     const cerrar = () => setSeleccion(null);
     return (
       <Modal transparent animationType="slide" visible onRequestClose={cerrar}>
@@ -134,10 +135,16 @@ export default function PlazasMapaScreen({
               <Text style={[styles.filaValor, { color: theme.colors.text, fontFamily: typography.medium }]}>{fila.valor}</Text>
             </View>
           ))}
-          {acciones.map(({ accion, titulo }) => (
-            <CustomButton key={accion} title={titulo} variant={accion === 'egresar' ? 'primary' : 'secondary'}
-              onPress={() => abrirAccion(accion, { plaza, dispositivoId, edificioId })} />
-          ))}
+          {acciones.map(({ accion, titulo }) => {
+            const bloqueada = accion === 'fuera_servicio' && !!bloqueo;
+            return (
+              <React.Fragment key={accion}>
+                <CustomButton title={titulo} variant={accion === 'egresar' ? 'primary' : 'secondary'} disabled={bloqueada}
+                  onPress={() => abrirAccion(accion, { plaza, dispositivoId, edificioId })} />
+                {bloqueada ? <Text style={[styles.filaValor, { color: theme.colors.textSoft, fontFamily: typography.medium }]}>{bloqueo}</Text> : null}
+              </React.Fragment>
+            );
+          })}
         </View>
       </Modal>
     );
