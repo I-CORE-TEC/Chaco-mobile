@@ -57,7 +57,7 @@ export const CAMPOS_CASO = [
 ];
 export const FOTOS_CASO = ['foto_vivienda', 'foto_acceso'];
 
-const conVerificacion = async (pedido) => {
+export const conVerificacion = async (pedido) => {
   try {
     return await pedido();
   } catch (error) {
