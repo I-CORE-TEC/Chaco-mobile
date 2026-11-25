@@ -92,7 +92,7 @@ test('fechas: dd/mm en hora argentina, con o sin hora, y vacío si no hay', asyn
   assert.equal(p.fechaCorta('no es fecha'), '');
 });
 
-test('detalle de la cama: desde/hasta y aviso de bloqueo', async () => {
+test('detalle de la cama: desde/hasta, sin fila de bloqueo (lo muestra la hoja de acciones)', async () => {
   const {p} = await preparar();
   const filas = p.detalleDeCama({
     codigo: 'B-02', estado: 'reservada', persona: {nombre: 'Paz, Nora', dni: '27111222'},
@@ -100,7 +100,7 @@ test('detalle de la cama: desde/hasta y aviso de bloqueo', async () => {
   }, {nombre: 'Aula 2'});
   igual(filas.map((f) => [f.clave, f.valor]), [
     ['sector', 'Aula 2'], ['persona', 'Paz, Nora'], ['dni', '27.111.222'], ['desde', '20/11 10:00'],
-    ['hasta', '22/11 10:00'], ['bloqueo', 'Reservada por la mesa']]);
+    ['hasta', '22/11 10:00']]);
 });
 
 test('acciones: solo las conocidas y con sus textos del mockup', async () => {
@@ -196,5 +196,11 @@ test('errores: sin conexión, 400, 403, 404 y respuestas intermedias', async () 
   igual(await caso(403, {code: 'SIN_PERMISO', detail: 'No podés ver este edificio.'}), {tipo: 'sin_permiso', mensaje: 'No podés ver este edificio.'});
   assert.equal((await caso(403, {code: 'SIN_MODULO', detail: 'Sin módulo'})).tipo, 'sin_modulo');
   assert.equal((await caso(404, {detail: 'No encontrado.'})).tipo, 'no_encontrado');
-  assert.equal((await caso(500, {detail: 'boom'})).tipo, 'otro');
+  igual(await caso(500, {detail: 'boom'}), {tipo: 'otro', mensaje: 'No se pudo traer la información. Probá de nuevo en unos segundos.'});
+  // Un 403 de un intermediario (HTML del WAF) no es un permiso, y nunca se muestra `error.message` crudo.
+  const waf = p.clasificarError({status: 403, unexpectedHtml: true, message: 'Respuesta inesperada <html>'});
+  igual(waf, {tipo: 'otro', mensaje: 'No se pudo traer la información. Probá de nuevo en unos segundos.'});
+  igual(p.clasificarError({status: 429, message: 'Too many'}), {tipo: 'otro', mensaje: 'No se pudo traer la información. Probá de nuevo en unos segundos.'});
+  igual(p.clasificarError({status: 502, unexpectedHtml: true, message: 'x'}).mensaje, 'No se pudo traer la información. Probá de nuevo en unos segundos.');
+  igual(p.clasificarError({status: 404, unexpectedHtml: true}).tipo, 'otro');
 });

@@ -18,6 +18,7 @@ export const RUTAS = {
 
 export const TEXTO_SIN_RED = 'Necesitás conexión para ver las plazas';
 export const TEXTO_SIN_EDIFICIOS = 'No tenés edificios con plazas para gestionar.';
+export const TEXTO_REINTENTAR = 'No se pudo traer la información. Probá de nuevo en unos segundos.';
 
 const conVerificacion = async (pedido) => {
   try {
@@ -35,10 +36,13 @@ export const clasificarError = (error) => {
   const detalle = typeof error?.payload?.detail === 'string' && error.payload.detail.trim() ? error.payload.detail.trim() : '';
   if (error?.network) return { tipo: 'sin_red', mensaje: TEXTO_SIN_RED };
   if (esSinModulo(error)) return { tipo: 'sin_modulo', mensaje: detalle || 'No tenés acceso a esta función.' };
-  if (status === 403) return { tipo: 'sin_permiso', mensaje: detalle || 'No tenés permiso para hacer esto.' };
-  if (status === 404 && !error?.unexpectedHtml) return { tipo: 'no_encontrado', mensaje: 'Ese edificio ya no está entre los tuyos.' };
-  if (status === 400) return { tipo: 'validacion', mensaje: detalle || 'El pedido no es válido.' };
-  return { tipo: 'otro', mensaje: error?.message || 'No se pudo traer la información.' };
+  const html = error?.unexpectedHtml === true;
+  // Un 403 que viene de un intermediario (el WAF de ECOM devuelve HTML) no es un permiso del back.
+  if (status === 403 && !html) return { tipo: 'sin_permiso', mensaje: detalle || 'No tenés permiso para hacer esto.' };
+  if (status === 404 && !html) return { tipo: 'no_encontrado', mensaje: 'Ese edificio ya no está entre los tuyos.' };
+  if (status === 400 && !html) return { tipo: 'validacion', mensaje: detalle || 'El pedido no es válido.' };
+  // HTML, 5xx, 429 y lo demás: texto fijo de reintentar, nunca `error.message` crudo.
+  return { tipo: 'otro', mensaje: TEXTO_REINTENTAR };
 };
 
 // ---- Resumen de camas ----
@@ -181,7 +185,8 @@ export const etiquetaDeCama = (plaza) => {
   return plaza?.persona?.nombre ? `Cama ${plaza.codigo}, ${estado}, ${plaza.persona.nombre}` : `Cama ${plaza?.codigo}, ${estado}`;
 };
 
-// Filas del detalle de una cama (hoja inferior). No hay fila de documento si el DNI viene null.
+// Filas del detalle de una cama (hoja inferior). No hay fila de documento si el DNI viene null. El bloqueo no es
+// una fila: lo muestra la hoja de acciones junto al botón que bloquea.
 export const detalleDeCama = (plaza, sector) => {
   const filas = [];
   if (sector?.nombre) filas.push({ clave: 'sector', titulo: 'Sector', valor: sector.nombre });
@@ -192,7 +197,6 @@ export const detalleDeCama = (plaza, sector) => {
   const hasta = fechaCorta(plaza?.hasta, { hora: true });
   if (desde) filas.push({ clave: 'desde', titulo: 'Desde', valor: desde });
   if (hasta) filas.push({ clave: 'hasta', titulo: 'Hasta', valor: hasta });
-  if (plaza?.bloqueo) filas.push({ clave: 'bloqueo', titulo: 'Aviso', valor: plaza.bloqueo });
   return filas;
 };
 
