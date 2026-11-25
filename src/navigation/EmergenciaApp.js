@@ -20,6 +20,9 @@ import EmergenciaIntegrantesScreen from '../screens/EmergenciaIntegrantesScreen'
 import EmergenciaFichaScreen from '../screens/EmergenciaFichaScreen';
 import EmergenciaCierreScreen from '../screens/EmergenciaCierreScreen';
 import EmergenciaPuertaScreen from '../screens/EmergenciaPuertaScreen';
+import PlazasEdificiosScreen from '../screens/PlazasEdificiosScreen';
+import PlazasMapaScreen from '../screens/PlazasMapaScreen';
+import PlazasEstadiasScreen from '../screens/PlazasEstadiasScreen';
 import {
   descartar, getBorradorEnCurso, getLocalidadesGuardadas, getPendingCount, getResumenPendientes, reintentar, syncPendientes,
 } from '../services/emergenciaCola';
@@ -49,10 +52,14 @@ const TITULOS = {
   llegadas_ficha: 'Persona',
   llegadas_cierre: 'Cerrar el ingreso',
   llegadas_puerta: 'Sin derivación',
+  plazas_edificios: 'Plazas y estadías',
+  plazas_mapa: 'Plazas y estadías',
+  plazas_estadias: 'Plazas y estadías',
 };
 const TITULOS_CIERRE = { alojar: 'Familia alojada', diferencia: 'Cerrar con diferencia', cancelar: 'Cancelar ingreso' };
 // Las vistas que se vuelven a pedir con el botón de sincronizar del Banner.
-const VISTAS_RECARGABLES = ['inicio', 'kits_dispositivos', 'kits_entregas', 'llegadas_dispositivos', 'llegadas_integrantes', 'llegadas_ficha'];
+const VISTAS_RECARGABLES = ['inicio', 'kits_dispositivos', 'kits_entregas', 'llegadas_dispositivos', 'llegadas_integrantes', 'llegadas_ficha',
+  'plazas_edificios', 'plazas_mapa', 'plazas_estadias'];
 const VISTAS_M1 = ['envios', 'formulario'];
 const INICIO = { vista: 'inicio', uuid: null };
 // Las pantallas con algo cargado que Atrás no tiene que perder en silencio: piden confirmar. Cada una avisa
@@ -105,6 +112,7 @@ export default function EmergenciaApp({ onCambiarModulo }) {
   const [pestana, setPestana] = useState('inicio');
   const [pantalla, setPantalla] = useState({ vista: 'inicio', uuid: null });
   const [recarga, setRecarga] = useState(0);
+  const [plazasMapa, setPlazasMapa] = useState(null);
   const [cargandoPerfil, setCargandoPerfil] = useState(false);
   const [sincronizando, setSincronizando] = useState(false);
   const [pendientes, setPendientes] = useState(0);
@@ -276,6 +284,10 @@ export default function EmergenciaApp({ onCambiarModulo }) {
       setPantalla({ vista: 'llegadas_dispositivos' });
       return;
     }
+    if (acceso.clave === 'plazas') {
+      setPantalla({ vista: 'plazas_edificios' });
+      return;
+    }
     proximamente(acceso.titulo);
   };
 
@@ -304,6 +316,29 @@ export default function EmergenciaApp({ onCambiarModulo }) {
     setEnviando(false);
     if (motivo === 'no_encontrada') verDispositivos({ sinEntrarDirecto: true });
     else verEntregas();
+  };
+
+  // ---- Plazas y estadías (lectura) ----
+  // `edificio` = { dispositivoId, edificioId, nombre } del edificio elegido; `mapa` es el último mapa traído y lo
+  // comparten el mapa y las estadías (solapa «Estadías · N», filtro por sector).
+  // acciones: PR B. `abrirAccion(accion, { plaza | estadia, dispositivoId, edificioId })` se engancha acá: mientras
+  // sea null las pantallas son solo lectura (no dibujan botones). Cada acción devuelve el mapa actualizado y lo
+  // pasa por `actualizarMapaPlazas(mapa)` para repintar sin otro pedido.
+  const abrirAccionPlazas = null;
+  const elegirEdificio = (item) => {
+    setPlazasMapa(null);
+    setPantalla({
+      vista: 'plazas_mapa',
+      edificio: { dispositivoId: item.dispositivo.id, edificioId: item.edificio.id, nombre: item.edificio.nombre || item.dispositivo.nombre },
+    });
+  };
+  const actualizarMapaPlazas = (mapa) => setPlazasMapa(mapa);
+  const verMapaPlazas = () => setPantalla((actual) => ({ ...actual, vista: 'plazas_mapa' }));
+  const verEstadiasPlazas = () => setPantalla((actual) => ({ ...actual, vista: 'plazas_estadias' }));
+  const verEdificiosPlazas = () => setPantalla({ vista: 'plazas_edificios' });
+  const edificioNoEncontrado = () => {
+    showToast({ type: 'warning', message: 'Ese edificio ya no está entre los tuyos. Se recargó la lista.' });
+    verEdificiosPlazas();
   };
 
   // ---- M2 · Llegada de familias ----
@@ -408,6 +443,7 @@ export default function EmergenciaApp({ onCambiarModulo }) {
   const { vista, uuid } = pantalla;
   const titulo = pestana === 'cuenta' ? 'Cuenta' : vista === 'inicio' ? `Hola, ${displayName}`
     : (['kits_entregas', 'llegadas_buscar'].includes(vista) && pantalla.dispositivo?.nombre)
+      || (['plazas_mapa', 'plazas_estadias'].includes(vista) && pantalla.edificio?.nombre)
       || (vista === 'llegadas_ficha' && pantalla.persona?.n != null && `Persona ${pantalla.persona.n}`)
       || (vista === 'llegadas_cierre' && TITULOS_CIERRE[pantalla.cierre]) || TITULOS[vista];
   const vistaVigente = useRef(vista);
@@ -421,6 +457,8 @@ export default function EmergenciaApp({ onCambiarModulo }) {
     else if (vista === 'llegadas_ficha' || vista === 'llegadas_cierre') setPantalla((actual) => ({ ...actual, vista: 'llegadas_integrantes', n: (actual.n || 0) + 1 }));
     else if (['llegadas_derivacion', 'llegadas_integrantes', 'llegadas_puerta'].includes(vista)) verBuscar({ dni: pantalla.dni || '' });
     else if (vista === 'llegadas_buscar' && !pantalla.unico) verDispositivosLlegadas();
+    else if (vista === 'plazas_estadias') verMapaPlazas();
+    else if (vista === 'plazas_mapa') verEdificiosPlazas();
     else setPantalla(INICIO);
     refrescarEstado();
   };
@@ -543,6 +581,21 @@ export default function EmergenciaApp({ onCambiarModulo }) {
             puedeAvisarALaMesa={pantalla.puerta?.puedeAvisarALaMesa ?? null} onIngresado={ingresoDirecto} onAvisado={avisoALaMesa}
             onNoEncontrado={llegadaNoEncontrada} onSinModulo={sinModulo} onEnviando={setEnviando}
             onCambios={marcarCambios('llegadas_puerta')} />
+        ) : null}
+        {pestana === 'inicio' && vista === 'plazas_edificios' ? (
+          <PlazasEdificiosScreen recarga={recarga} onElegir={elegirEdificio} onSinModulo={sinModulo} />
+        ) : null}
+        {pestana === 'inicio' && vista === 'plazas_mapa' ? (
+          <PlazasMapaScreen key={`mapa-${pantalla.edificio?.dispositivoId}-${pantalla.edificio?.edificioId}`}
+            dispositivoId={pantalla.edificio?.dispositivoId} edificioId={pantalla.edificio?.edificioId}
+            mapa={plazasMapa} onMapaActualizado={actualizarMapaPlazas} onVerEstadias={verEstadiasPlazas}
+            abrirAccion={abrirAccionPlazas} recarga={recarga} onNoEncontrado={edificioNoEncontrado} onSinModulo={sinModulo} />
+        ) : null}
+        {pestana === 'inicio' && vista === 'plazas_estadias' ? (
+          <PlazasEstadiasScreen key={`estadias-${pantalla.edificio?.dispositivoId}-${pantalla.edificio?.edificioId}`}
+            dispositivoId={pantalla.edificio?.dispositivoId} edificioId={pantalla.edificio?.edificioId}
+            sectores={plazasMapa?.sectores || []} total={plazasMapa?.resumen?.ocupadas ?? null} onVerCamas={verMapaPlazas}
+            abrirAccion={abrirAccionPlazas} recarga={recarga} onNoEncontrado={edificioNoEncontrado} onSinModulo={sinModulo} />
         ) : null}
       </View>
       <BottomNav items={PESTANAS} activeTab={pestana} onTabPress={irAPestana} />
