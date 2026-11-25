@@ -750,6 +750,9 @@ async function montarApp({pendientes = 0, resumen = null, enCurso = null, sync =
     '../screens/EmergenciaFichaScreen': {__esModule: true, default: capturar('llegadasFicha')},
     '../screens/EmergenciaCierreScreen': {__esModule: true, default: capturar('llegadasCierre')},
     '../screens/EmergenciaPuertaScreen': {__esModule: true, default: capturar('llegadasPuerta')},
+    '../screens/PlazasEdificiosScreen': {__esModule: true, default: capturar('plazas')},
+    '../screens/PlazasMapaScreen': {__esModule: true, default: capturar('plazas')},
+    '../screens/PlazasEstadiasScreen': {__esModule: true, default: capturar('plazas')},
     '../services/emergenciaLimpieza': {depurarBorradoresFicha: async () => {}},
     '../services/emergenciaCola': {
       syncPendientes: async () => { llamadas.sync += 1; llamadas.orden.push('sync'); return sync ? sync() : {synced: 0}; },
