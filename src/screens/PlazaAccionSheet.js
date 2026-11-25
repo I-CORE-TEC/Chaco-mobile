@@ -48,6 +48,7 @@ export default function PlazaAccionSheet({ plaza = null, onListo, onCancelar }) 
   const cambiarModo = (nuevo) => {
     if (enviando) return;
     setModo(nuevo);
+    setMotivo('');
     setIntentado(false);
     setErroresServidor({});
     setAviso('');
@@ -63,7 +64,7 @@ export default function PlazaAccionSheet({ plaza = null, onListo, onCancelar }) 
       const r = await intentarAccion(() => accionarPlaza(plaza.id, accion, datos), 'cama');
       if (r.ok) {
         showToast({ type: 'success', message: 'Listo.' });
-        onListo?.(r.respuesta?.mapa ?? r.respuesta ?? null);
+        onListo?.(r.respuesta?.mapa ?? null);
         return;
       }
       const c = r.clasificacion;
@@ -124,6 +125,7 @@ export default function PlazaAccionSheet({ plaza = null, onListo, onCancelar }) 
   const hayReserva = permitidas.reservar || permitidas.prestar;
   const hayAlgo = hayReserva || permitidas.liberar || permitidas.fueraServicio || permitidas.volver;
   const persona = plaza?.persona;
+  const bloqueo = typeof plaza?.bloqueo === 'string' ? plaza.bloqueo.trim() : '';
 
   return (
     <ScrollView style={{ flex: 1, backgroundColor: theme.colors.background }} contentContainerStyle={styles.content}
@@ -154,7 +156,7 @@ export default function PlazaAccionSheet({ plaza = null, onListo, onCancelar }) 
                 accessibilityLabel="Hasta" placeholder="DD/MM/AAAA" placeholderTextColor={theme.colors.textSoft} style={caja(errorDe('hasta').length > 0)} />
               {mensajes(errorDe('hasta'), 'hasta')}
               <Text style={etiqueta}>Motivo</Text>
-              <TextInput value={motivo} onChangeText={setMotivo} editable={!enviando} multiline maxLength={500}
+              <TextInput value={motivo} onChangeText={setMotivo} editable={!enviando} multiline maxLength={200}
                 accessibilityLabel="Motivo" placeholderTextColor={theme.colors.textSoft} style={[...caja(errorDe('motivo').length > 0), styles.areaTexto]} />
               {mensajes(errorDe('motivo'), 'motivo')}
               {mensajes(errorDe('non_field_errors'), 'nf')}
@@ -174,14 +176,18 @@ export default function PlazaAccionSheet({ plaza = null, onListo, onCancelar }) 
           {modo === 'fuera_servicio' ? (
             <>
               <Text style={etiqueta}>Motivo *</Text>
-              <TextInput value={motivo} onChangeText={setMotivo} editable={!enviando} multiline maxLength={500}
+              <TextInput value={motivo} onChangeText={setMotivo} editable={!enviando} multiline maxLength={200}
                 accessibilityLabel="Motivo para sacar de servicio" placeholderTextColor={theme.colors.textSoft} style={[...caja(errorDe('motivo').length > 0), styles.areaTexto]} />
               {mensajes(errorDe('motivo'), 'motivo-fs')}
               {mensajes(errorDe('non_field_errors'), 'nf-fs')}
               <CustomButton title="Sacar de servicio" size="L" loading={enviando} disabled={enviando} onPress={() => pedirConfirmacion('fuera_servicio')} />
             </>
           ) : (
-            <CustomButton title="Sacar de servicio" size="L" variant="secondary" iconLeft="construct-outline" disabled={enviando} onPress={() => cambiarModo('fuera_servicio')} />
+            <>
+              <CustomButton title="Sacar de servicio" size="L" variant="secondary" iconLeft="construct-outline" disabled={enviando || !!bloqueo}
+                onPress={() => cambiarModo('fuera_servicio')} />
+              {bloqueo ? <Text style={ayuda}>{bloqueo}</Text> : null}
+            </>
           )}
         </View>
       ) : null}

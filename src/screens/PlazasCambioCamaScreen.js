@@ -5,7 +5,7 @@ import CustomButton from '../components/CustomButton';
 import { useTheme } from '../context/ThemeContext';
 import { useToast } from '../context/ToastContext';
 import {
-  TEXTO_PLAZA_OCUPADA, TEXTO_SIN_RED, cambiarPlaza, getPlazasParaCambio, intentarAccion, sectoresConLibres, validarCambioPlaza,
+  TEXTO_PLAZA_OCUPADA, TEXTO_SIN_RED, cambiarPlaza, clasificarErrorPlaza, getPlazasParaCambio, intentarAccion, sectoresConLibres, validarCambioPlaza,
 } from '../services/plazasAccionesApi';
 import { keyboardDismissModeFor } from '../utils/teclado';
 import { fontSizes, radii } from '../theme';
@@ -41,7 +41,7 @@ export default function PlazasCambioCamaScreen({ estadia = null, plaza = null, o
       setErrorCarga('');
       return lista;
     } catch (e) {
-      if (montado.current) setErrorCarga(e?.payload?.detail || e?.message || 'No se pudieron cargar las camas libres.');
+      if (montado.current) setErrorCarga(clasificarErrorPlaza(e, 'estadia').mensaje);
     }
     return null;
   };
@@ -135,6 +135,7 @@ export default function PlazasCambioCamaScreen({ estadia = null, plaza = null, o
         {codigoActual ? <Text style={ayuda}>{`Hoy en la cama ${codigoActual}${sectorActual ? ` · ${sectorActual}` : ''}`}</Text> : null}
       </View>
 
+      {errorCarga ? <Text accessibilityRole="alert" style={[styles.error, { color: theme.colors.danger, fontFamily: typography.semibold }]}>{errorCarga}</Text> : null}
       {aviso ? <Text accessibilityRole="alert" style={[styles.error, { color: theme.colors.danger, fontFamily: typography.semibold }]}>{aviso}</Text> : null}
 
       <View style={tarjeta}>

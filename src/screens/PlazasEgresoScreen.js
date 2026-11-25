@@ -5,7 +5,7 @@ import CustomButton from '../components/CustomButton';
 import { useTheme } from '../context/ThemeContext';
 import { useToast } from '../context/ToastContext';
 import {
-  TEXTO_SIN_RED, egresarEstadia, getMotivosEgreso, intentarAccion, validarEgreso,
+  TEXTO_SIN_RED, clasificarErrorPlaza, egresarEstadia, getMotivosEgreso, intentarAccion, validarEgreso,
 } from '../services/plazasAccionesApi';
 import { keyboardDismissModeFor } from '../utils/teclado';
 import { fontSizes, radii } from '../theme';
@@ -33,16 +33,20 @@ export default function PlazasEgresoScreen({ estadia = null, plaza = null, onLis
   const enviandoRef = useRef(false);
   const montado = useRef(true);
 
+  const cargarMotivos = async () => {
+    try {
+      const lista = await getMotivosEgreso();
+      if (!montado.current) return;
+      setMotivos(Array.isArray(lista) ? lista.filter((m) => m?.id != null) : []);
+      setErrorCarga('');
+    } catch (e) {
+      if (montado.current) setErrorCarga(clasificarErrorPlaza(e, 'estadia').mensaje);
+    }
+  };
+
   useEffect(() => {
     montado.current = true;
-    (async () => {
-      try {
-        const lista = await getMotivosEgreso();
-        if (montado.current) setMotivos(Array.isArray(lista) ? lista.filter((m) => m?.id != null) : []);
-      } catch (e) {
-        if (montado.current) setErrorCarga(e?.payload?.detail || e?.message || 'No se pudieron cargar los motivos.');
-      }
-    })();
+    cargarMotivos();
     return () => { montado.current = false; };
   }, []);
 
@@ -92,8 +96,13 @@ export default function PlazasEgresoScreen({ estadia = null, plaza = null, onLis
     ]);
   };
 
-  if (errorCarga) {
-    return <View style={styles.centro}><Text style={[styles.texto, { color: theme.colors.text, fontFamily: typography.medium }]}>{errorCarga}</Text></View>;
+  if (errorCarga && !motivos) {
+    return (
+      <View style={styles.centro}>
+        <Text style={[styles.texto, { color: theme.colors.text, fontFamily: typography.medium }]}>{errorCarga}</Text>
+        <CustomButton title="Reintentar" variant="secondary" onPress={cargarMotivos} />
+      </View>
+    );
   }
   if (!motivos) {
     return <View style={styles.centro}><ActivityIndicator size="large" color={theme.colors.primary} accessibilityLabel="Cargando los motivos" /></View>;
@@ -169,7 +178,7 @@ export default function PlazasEgresoScreen({ estadia = null, plaza = null, onLis
 
 const styles = StyleSheet.create({
   content: { padding: 16, paddingBottom: 40, gap: 12 },
-  centro: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
+  centro: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 12 },
   card: { borderWidth: 1, borderRadius: radii.xl, padding: 14, gap: 8 },
   titulo: { fontSize: fontSizes.base },
   etiqueta: { fontSize: fontSizes.sm },

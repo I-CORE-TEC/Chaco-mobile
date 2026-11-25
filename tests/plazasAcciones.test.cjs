@@ -158,7 +158,10 @@ test('Errores: se clasifican por status y code', async () => {
   const {servicio} = await entorno(() => response(200, {}));
   const c = (status, payload, extra = {}, contexto) => servicio.clasificarErrorPlaza({status, payload, ...extra}, contexto);
   assert.equal(c(403, {code: 'SIN_PERMISO', detail: 'x'}).tipo, 'sin_permiso');
-  assert.equal(c(403, {code: 'SIN_PERMISO', detail: 'x'}).mensaje, 'No tenés permiso para esta acción.');
+  assert.equal(c(403, {code: 'SIN_PERMISO', detail: 'Falta dispositivo.egresar.'}).mensaje, 'Falta dispositivo.egresar.');
+  assert.equal(c(403, {code: 'SIN_PERMISO'}).mensaje, 'No tenés permiso para esta acción.');
+  assert.equal(c(403, null).tipo, 'reintentable', '403 sin code es del WAF');
+  assert.equal(c(403, {detail: 'Forbidden'}).tipo, 'reintentable');
   assert.equal(c(403, {code: 'SIN_MODULO', detail: 'Sin módulo'}).tipo, 'sin_modulo');
   const egreso = c(409, {code: 'EGRESO_CON_FORMULARIO', detail: 'Este egreso se registra desde el backoffice.'});
   assert.equal(egreso.tipo, 'egreso_con_formulario');
@@ -191,7 +194,7 @@ test('Validación en el teléfono: prestar exige hasta, sacar de servicio exige 
   const {servicio} = await entorno(() => response(200, {}));
   assert.ok(servicio.validarAccionPlaza('prestar', {dni: '30123456'}).hasta);
   assert.ok(servicio.validarAccionPlaza('reservar', {dni: '12'}).dni);
-  assert.ok(servicio.validarAccionPlaza('reservar', {dni: '30123456', hasta: '01/01/2020'}).hasta);
+  assert.deepEqual(plano(servicio.validarAccionPlaza('reservar', {dni: '30123456', hasta: '01/01/2020'}).hasta), ['«Hasta» no puede ser anterior a hoy.']);
   assert.deepEqual(plano(servicio.validarAccionPlaza('reservar', {dni: '30123456'})), {});
   assert.ok(servicio.validarAccionPlaza('fuera_servicio', {motivo: ' '}).motivo);
   assert.ok(servicio.validarEgreso({}).motivo && servicio.validarEgreso({}).destino);
@@ -255,7 +258,7 @@ test('Egreso: sin conexión no se envía y se avisa', async () => {
 test('Egreso: 409 EGRESO_CON_FORMULARIO, 403 SIN_PERMISO y 404 con su mensaje', async () => {
   const casos = [
     [409, {code: 'EGRESO_CON_FORMULARIO', detail: 'Este egreso se registra desde el backoffice.'}, 'Este egreso se registra desde el backoffice.'],
-    [403, {code: 'SIN_PERMISO', detail: 'x'}, 'No tenés permiso para esta acción.'],
+    [403, {code: 'SIN_PERMISO'}, 'No tenés permiso para esta acción.'],
   ];
   for (const [status, payload, mensaje] of casos) {
     const ui = await montarEgreso(rutasEgreso(call => call.method === 'POST' ? response(status, payload) : null));
@@ -478,7 +481,7 @@ test('Hoja: persona inexistente marca el DNI; sin red no manda', async () => {
 });
 
 test('Hoja: 403 SIN_PERMISO y 404 con su mensaje', async () => {
-  const sinPermiso = await montarHoja(LIBRE, () => response(403, {code: 'SIN_PERMISO', detail: 'x'}));
+  const sinPermiso = await montarHoja(LIBRE, () => response(403, {code: 'SIN_PERMISO'}));
   try {
     await sinPermiso.escribir('DNI de la persona', '30123456');
     await sinPermiso.pressButton('Reservar la cama');
@@ -492,4 +495,59 @@ test('Hoja: 403 SIN_PERMISO y 404 con su mensaje', async () => {
     await confirmar(noHay.alerts, 'Reservar la cama');
     assert.equal(noHay.alerts[noHay.alerts.length - 1][1], 'La cama ya no está disponible, actualizá.');
   } finally { await noHay.close(); }
+});
+
+test('Hoja: con bloqueo, «Sacar de servicio» queda deshabilitado con el texto; el motivo se limpia al cambiar de modo y tiene tope 200', async () => {
+  const ui = await montarHoja({...LIBRE, bloqueo: 'La plaza está ocupada: egresá primero.'});
+  try {
+    assert.equal(ui.button('Sacar de servicio').props.disabled, true);
+    assert.ok(ui.labels().includes('La plaza está ocupada: egresá primero.'));
+    assert.equal(ui.input('Motivo').props.maxLength, 200);
+    await ui.escribir('Motivo', 'algo');
+    await ui.press('Prestar');
+    assert.equal(ui.input('Motivo').props.value, '');
+  } finally { await ui.close(); }
+  const libre = await montarHoja(LIBRE);
+  try {
+    assert.equal(libre.button('Sacar de servicio').props.disabled, false);
+    await libre.pressButton('Sacar de servicio');
+    assert.equal(libre.input('Motivo para sacar de servicio').props.maxLength, 200);
+  } finally { await libre.close(); }
+});
+
+test('Hoja: onListo recibe solo el mapa (null si la respuesta no lo trae)', async () => {
+  const ui = await montarHoja({...LIBRE, estado: 'reservada', acciones: ['liberar']}, () => response(200, {ok: true}));
+  try {
+    await ui.pressButton('Liberar');
+    await confirmar(ui.alerts, 'Liberar la cama');
+    assert.deepEqual(ui.listos, [null]);
+  } finally { await ui.close(); }
+});
+
+test('Egreso: si fallan los motivos se muestra el texto clasificado y se puede reintentar', async () => {
+  let intentos = 0;
+  const ui = await montarEgreso((call) => {
+    if (call.url.endsWith('/motivos-egreso/')) { intentos += 1; return intentos === 1 ? response(503, {}) : response(200, MOTIVOS); }
+    return response(200, {ok: true, mapa: MAPA});
+  });
+  try {
+    assert.ok(ui.labels().includes('No se pudo confirmar si la acción llegó. Actualizá el mapa antes de repetirla.'));
+    await ui.pressButton('Reintentar');
+    assert.ok(ui.labels().includes('Benítez, Ramón'));
+  } finally { await ui.close(); }
+});
+
+test('Cambio de cama: si falla la recarga tras «plaza ocupada» se muestra el error con las camas viejas', async () => {
+  let lecturas = 0;
+  const ui = await montarCambio((call) => {
+    if (call.method === 'GET') { lecturas += 1; return lecturas === 1 ? response(200, LIBRES) : response(503, {}); }
+    return response(400, {code: 'VALIDACION', plaza_id: ['Ocupada.']});
+  });
+  try {
+    await ui.press('Cama A2-03');
+    await ui.escribir('Motivo del cambio', 'x');
+    await ui.pressButton('Cambiar de cama');
+    await confirmar(ui.alerts, 'Cambiar de cama');
+    assert.ok(ui.labels().includes('No se pudo confirmar si la acción llegó. Actualizá el mapa antes de repetirla.'));
+  } finally { await ui.close(); }
 });

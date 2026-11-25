@@ -117,7 +117,7 @@ export const validarAccionPlaza = (accion, { dni, hasta, motivo } = {}) => {
     if (accion === 'prestar' && !presente(hasta)) errores.hasta = ['El préstamo necesita fecha «Hasta».'];
     if (presente(hasta)) {
       try {
-        if (new Date(hastaIso(hasta)).getTime() <= Date.now()) errores.hasta = ['«Hasta» tiene que ser posterior a hoy.'];
+        if (new Date(hastaIso(hasta)).getTime() <= Date.now()) errores.hasta = ['«Hasta» no puede ser anterior a hoy.'];
       } catch {
         errores.hasta = ['La fecha no es válida: tiene que ser DD/MM/AAAA.'];
       }
@@ -159,7 +159,9 @@ export const clasificarErrorPlaza = (error, contexto = 'cama') => {
   if (error?.code === 'SIN_RED') return { tipo: 'sin_red', mensaje: TEXTO_SIN_RED };
   if (status === 401) return { tipo: 'sesion', mensaje: TEXTO_SESION };
   if (esSinModulo(error)) return { tipo: 'sin_modulo', mensaje: detalle || TEXTO_SIN_PERMISO };
-  if (status === 403 && !html) return { tipo: 'sin_permiso', mensaje: TEXTO_SIN_PERMISO };
+  if (status === 403 && !html && code === 'SIN_PERMISO') return { tipo: 'sin_permiso', mensaje: detalle || TEXTO_SIN_PERMISO };
+  // 403 sin `code` no es del back (WAF): se trata como falla transitoria, igual que la cola.
+  if (status === 403) return { tipo: 'reintentable', mensaje: TEXTO_REINTENTAR };
   if (status === 409 && !html && code === 'EGRESO_CON_FORMULARIO') return { tipo: 'egreso_con_formulario', mensaje: TEXTO_EGRESO_CON_FORMULARIO };
   if (status === 404 && !html) {
     return { tipo: 'no_encontrada', mensaje: contexto === 'estadia' ? TEXTO_NO_DISPONIBLE_ESTADIA : TEXTO_NO_DISPONIBLE_CAMA };
