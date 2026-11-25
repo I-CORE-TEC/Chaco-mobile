@@ -10,11 +10,20 @@ import {
 import { keyboardDismissModeFor } from '../utils/teclado';
 import { fontSizes, radii } from '../theme';
 
+// Solo informa al padre: un error de su callback no corta la pantalla.
+const avisar = (fn, valor) => {
+  try {
+    fn?.(valor);
+  } catch {
+    // Nada.
+  }
+};
+
 // Egreso por persona (§15, mockup Egreso.dc.html): motivo del catálogo, destino, ¿devolvieron las
 // pertenencias?, observaciones. Pide confirmación antes de mandar, solo con conexión (no hay cola) y no
 // deja mandar dos veces. Props: `{ dispositivoId, edificioId, plaza?, estadia?, onListo(mapa), onCancelar() }`;
 // la estadía sale de `estadia.id` o, si viene la cama, de `plaza.estadia_id`.
-export default function PlazasEgresoScreen({ estadia = null, plaza = null, onListo, onCancelar }) {
+export default function PlazasEgresoScreen({ estadia = null, plaza = null, onListo, onCancelar, onEnviando, onCambios }) {
   const { theme, typography } = useTheme();
   const { showToast, showAlert } = useToast();
   const estadiaId = estadia?.id ?? plaza?.estadia_id ?? null;
@@ -58,6 +67,7 @@ export default function PlazasEgresoScreen({ estadia = null, plaza = null, onLis
     if (enviandoRef.current) return;
     enviandoRef.current = true;
     setEnviando(true);
+    avisar(onEnviando, true);
     setAviso('');
     try {
       const r = await intentarAccion(() => egresarEstadia(estadiaId, datos), 'estadia');
@@ -81,8 +91,12 @@ export default function PlazasEgresoScreen({ estadia = null, plaza = null, onLis
     } finally {
       enviandoRef.current = false;
       if (montado.current) setEnviando(false);
+      avisar(onEnviando, false);
     }
   };
+
+  const hayCambios = motivoId !== null || destino.trim() !== '' || pertenencias !== null || observaciones.trim() !== '';
+  useEffect(() => { avisar(onCambios, hayCambios); }, [hayCambios]);
 
   const registrar = () => {
     if (enviandoRef.current) return;

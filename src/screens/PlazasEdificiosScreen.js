@@ -7,10 +7,12 @@ import { chipsDeResumen, clasificarError, getEdificios, TEXTO_SIN_EDIFICIOS } fr
 import { statusTones } from '../theme/statusBadges';
 import { fontSizes, radii } from '../theme';
 
-// Plazas · lista de edificios del usuario (GET edificios/). Aunque haya uno solo se muestra la lista.
-// `onElegir(item)` abre el mapa del edificio ({ dispositivo, edificio, resumen }); un 403 SIN_MODULO
+// Plazas · lista de edificios del usuario (GET edificios/). Con UN solo edificio se entra directo a su mapa
+// (`onElegir(item, { unico: true })`), salvo con `entrarDirecto={false}` (se volvió acá por un 404: entrar otra
+// vez sería un bucle). `onElegir(item, { unico: false })` abre el mapa del edificio elegido
+// ({ dispositivo, edificio, resumen }); un 403 SIN_MODULO
 // llama a `onSinModulo(mensaje)`. `recarga` cambia cuando hay que volver a pedir la lista.
-export default function PlazasEdificiosScreen({ onElegir, onSinModulo, recarga = 0 }) {
+export default function PlazasEdificiosScreen({ onElegir, onSinModulo, recarga = 0, entrarDirecto = true }) {
   const { theme, typography } = useTheme();
   const [edificios, setEdificios] = useState(null);
   const [error, setError] = useState(null);
@@ -18,6 +20,7 @@ export default function PlazasEdificiosScreen({ onElegir, onSinModulo, recarga =
   const [refrescando, setRefrescando] = useState(false);
   const montado = useRef(true);
   const recargaInicial = useRef(recarga);
+  const entroDirecto = useRef(!entrarDirecto);
 
   const cargar = useCallback(async ({ silencioso = false } = {}) => {
     if (silencioso) setRefrescando(true);
@@ -26,6 +29,10 @@ export default function PlazasEdificiosScreen({ onElegir, onSinModulo, recarga =
       if (!montado.current) return;
       setEdificios(lista);
       setError(null);
+      if (lista.length === 1 && !entroDirecto.current) {
+        entroDirecto.current = true;
+        onElegir?.(lista[0], { unico: true });
+      }
     } catch (e) {
       if (!montado.current) return;
       const clasificado = clasificarError(e);
@@ -56,7 +63,7 @@ export default function PlazasEdificiosScreen({ onElegir, onSinModulo, recarga =
     return (
       <Pressable key={`${item.dispositivo.id}-${item.edificio.id}`} accessibilityRole="button"
         accessibilityLabel={`${titulo}. ${subtitulo}. ${chips.map((chip) => chip.texto).join(', ')}`}
-        onPress={() => onElegir?.(item)}
+        onPress={() => onElegir?.(item, { unico: false })}
         style={({ pressed }) => [styles.card, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }, pressed && styles.presionada]}>
         <View style={styles.fila}>
           <Ionicons name="business-outline" size={24} color={theme.colors.primary} accessible={false} importantForAccessibility="no" />

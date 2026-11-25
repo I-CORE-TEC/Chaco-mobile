@@ -753,6 +753,10 @@ async function montarApp({pendientes = 0, resumen = null, enCurso = null, sync =
     '../screens/PlazasEdificiosScreen': {__esModule: true, default: capturar('plazas')},
     '../screens/PlazasMapaScreen': {__esModule: true, default: capturar('plazas')},
     '../screens/PlazasEstadiasScreen': {__esModule: true, default: capturar('plazas')},
+    '../screens/PlazasEgresoScreen': {__esModule: true, default: () => null},
+    '../screens/PlazasCambioCamaScreen': {__esModule: true, default: () => null},
+    '../screens/PlazaAccionSheet': {__esModule: true, default: () => null},
+    '../services/plazasApi': {normalizarMapa: mapa => mapa},
     '../services/emergenciaLimpieza': {depurarBorradoresFicha: async () => {}},
     '../services/emergenciaCola': {
       syncPendientes: async () => { llamadas.sync += 1; llamadas.orden.push('sync'); return sync ? sync() : {synced: 0}; },

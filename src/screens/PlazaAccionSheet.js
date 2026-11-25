@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, Pressable } from 'react-native';
 import TextInput from '../components/FormInput';
 import CustomButton from '../components/CustomButton';
@@ -9,6 +9,15 @@ import {
 } from '../services/plazasAccionesApi';
 import { keyboardDismissModeFor } from '../utils/teclado';
 import { fontSizes, radii } from '../theme';
+
+// Solo informa al padre: un error de su callback no corta la pantalla.
+const avisar = (fn, valor) => {
+  try {
+    fn?.(valor);
+  } catch {
+    // Nada.
+  }
+};
 
 const ESTADOS = {
   disponible: 'Libre', reservada: 'Reservada', prestada: 'Prestada', fuera_servicio: 'Fuera de servicio', ocupada: 'Ocupada',
@@ -23,7 +32,7 @@ const TITULOS = {
 // volver a servicio. Solo muestra lo que viene en `plaza.acciones`. Cada acción pide confirmación, va solo con
 // conexión y no se manda dos veces. Egresar y cambiar de cama tienen su propia pantalla. Props:
 // `{ dispositivoId, edificioId, plaza, onListo(mapa), onCancelar() }` (las acciones responden con el mapa).
-export default function PlazaAccionSheet({ plaza = null, onListo, onCancelar }) {
+export default function PlazaAccionSheet({ plaza = null, onListo, onCancelar, onEnviando, onCambios }) {
   const { theme, typography } = useTheme();
   const { showToast, showAlert } = useToast();
   const permitidas = accionesDeCama(plaza);
@@ -39,7 +48,7 @@ export default function PlazaAccionSheet({ plaza = null, onListo, onCancelar }) 
   const [haciendo, setHaciendo] = useState(null);
   const enviandoRef = useRef(false);
   const montado = useRef(true);
-  React.useEffect(() => { montado.current = true; return () => { montado.current = false; }; }, []);
+  useEffect(() => { montado.current = true; return () => { montado.current = false; }; }, []);
 
   const datos = { dni, hasta, motivo };
   const erroresCliente = intentado && modo ? validarAccionPlaza(modo, datos) : {};
@@ -58,6 +67,7 @@ export default function PlazaAccionSheet({ plaza = null, onListo, onCancelar }) 
     if (enviandoRef.current) return;
     enviandoRef.current = true;
     setEnviando(true);
+    avisar(onEnviando, true);
     setHaciendo(accion);
     setAviso('');
     try {
@@ -82,8 +92,12 @@ export default function PlazaAccionSheet({ plaza = null, onListo, onCancelar }) 
     } finally {
       enviandoRef.current = false;
       if (montado.current) setEnviando(false);
+      avisar(onEnviando, false);
     }
   };
+
+  const hayCambios = dni.trim() !== '' || hasta.trim() !== '' || motivo.trim() !== '';
+  useEffect(() => { avisar(onCambios, hayCambios); }, [hayCambios]);
 
   const textoDeConfirmacion = (accion) => {
     const cama = plaza?.codigo ? `la cama ${plaza.codigo}` : 'la cama';

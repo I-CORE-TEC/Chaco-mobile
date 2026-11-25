@@ -83,19 +83,38 @@ const MAPA = {
   ]}],
 };
 
-test('Edificios: lista con el resumen de camas, también con uno solo, y abre el elegido', async () => {
+const EDIFICIO_A = {dispositivo: {id: 3, nombre: 'Centro'}, edificio: {id: 9, nombre: 'Pabellón A', direccion: 'Calle 1'},
+  resumen: {total: 48, libres: 12, ocupadas: 31, reservadas: 3, prestadas: 0, fuera_servicio: 0}};
+const EDIFICIO_B = {dispositivo: {id: 3, nombre: 'Centro'}, edificio: {id: 10, nombre: 'Pabellón B', direccion: 'Calle 2'},
+  resumen: {total: 10, libres: 10, ocupadas: 0, reservadas: 0, prestadas: 0, fuera_servicio: 0}};
+
+test('Edificios: con un solo edificio entra directo a su mapa; con entrarDirecto={false} muestra la lista (sin bucle)', async () => {
   const {r, pantalla} = await preparar();
-  r.setFetch(async () => response(200, [{dispositivo: {id: 3, nombre: 'Centro'}, edificio: {id: 9, nombre: 'Pabellón A', direccion: 'Calle 1'},
-    resumen: {total: 48, libres: 12, ocupadas: 31, reservadas: 3, prestadas: 0, fuera_servicio: 0}}]));
+  r.setFetch(async () => response(200, [EDIFICIO_A]));
   const elegidos = [];
-  const v = await montar(pantalla('PlazasEdificiosScreen'), {onElegir: item => elegidos.push(item.edificio.id)});
+  const directo = await montar(pantalla('PlazasEdificiosScreen'), {onElegir: (item, opciones) => elegidos.push([item.edificio.id, opciones.unico])});
+  try {
+    assert.deepEqual(elegidos, [[9, true]]);
+  } finally { await directo.cierra(); }
+  const vuelta = await montar(pantalla('PlazasEdificiosScreen'), {entrarDirecto: false, onElegir: () => elegidos.push('bucle')});
+  try {
+    assert.deepEqual(elegidos, [[9, true]]);
+    assert.ok(vuelta.textos().includes('Pabellón A'));
+  } finally { await vuelta.cierra(); }
+});
+
+test('Edificios: lista con el resumen de camas y abre el elegido (unico: false)', async () => {
+  const {r, pantalla} = await preparar();
+  r.setFetch(async () => response(200, [EDIFICIO_A, EDIFICIO_B]));
+  const elegidos = [];
+  const v = await montar(pantalla('PlazasEdificiosScreen'), {onElegir: (item, opciones) => elegidos.push([item.edificio.id, opciones.unico])});
   try {
     const t = v.textos();
     assert.ok(t.includes('Pabellón A'));
     assert.ok(t.includes('12 libres') && t.includes('31 ocupadas') && t.includes('3 reservadas'));
     assert.ok(!t.some(x => /fuera de servicio/.test(x)));
     await v.toca(v.botones().map(b => b.props.accessibilityLabel).find(l => l && l.startsWith('Pabellón A')));
-    assert.deepEqual(elegidos, [9]);
+    assert.deepEqual(elegidos, [[9, false]]);
   } finally { await v.cierra(); }
 });
 
@@ -204,5 +223,28 @@ test('Estadías: con abrirAccion cada tarjeta ofrece Egreso y Cambiar de cama', 
     await v.toca('Egreso');
     await v.toca('Cambiar de cama');
     assert.deepEqual(llamadas, [['egresar', 7], ['reubicar', 7]]);
+  } finally { await v.cierra(); }
+});
+
+test('Estadías: al cambiar de filtro se vacía la lista y el «Ver más» mientras carga el filtro nuevo', async () => {
+  const {r, pantalla} = await preparar();
+  const item = id => ({id, persona: {nombre: `Persona ${id}`, dni: null}, sector: {id: 1, nombre: 'Aula 1'}, plaza: {id, codigo: `A-${id}`},
+    fecha_ingreso: '2026-11-18T21:40:00-03:00', fecha_egreso: null, estado: 'activa', emergencia: null, acciones: []});
+  let liberar;
+  const lenta = new Promise(resolve => { liberar = resolve; });
+  r.setFetch(async (url) => {
+    const u = String(url);
+    if (u.includes('estado=egresada')) { await lenta; return response(200, {count: 1, next: null, previous: null, results: [item(9)]}); }
+    return response(200, {count: 3, next: 'https://example.test/x?page=2', previous: null, results: [item(1), item(2)]});
+  });
+  const v = await montar(pantalla('PlazasEstadiasScreen'), {dispositivoId: 3, edificioId: 9, sectores: [], total: 3});
+  try {
+    assert.ok(v.textos().includes('Persona 1'));
+    assert.ok(v.botones().some(b => b.type === 'CustomButton' && b.props.title === 'Ver más'));
+    await v.toca('Filtrar: Egresadas');
+    assert.ok(!v.textos().includes('Persona 1'), 'las filas del filtro anterior no quedan a la vista');
+    assert.ok(!v.botones().some(b => b.type === 'CustomButton' && b.props.title === 'Ver más'), 'ni el Ver más del filtro anterior');
+    liberar();
+    await v.toca('Filtrar: Egresadas');
   } finally { await v.cierra(); }
 });

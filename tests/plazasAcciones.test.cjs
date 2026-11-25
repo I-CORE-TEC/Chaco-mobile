@@ -551,3 +551,21 @@ test('Cambio de cama: si falla la recarga tras «plaza ocupada» se muestra el e
     assert.ok(ui.labels().includes('No se pudo confirmar si la acción llegó. Actualizá el mapa antes de repetirla.'));
   } finally { await ui.close(); }
 });
+
+test('Cambio de cama: sin cama actual (asignación) el motivo es opcional; con cama actual sigue obligatorio', async () => {
+  const {servicio} = await entorno(() => response(200, {}));
+  assert.ok(servicio.validarCambioPlaza({plaza_id: 45}).motivo);
+  assert.deepEqual(plano(servicio.validarCambioPlaza({plaza_id: 45}, {motivoOpcional: true})), {});
+  assert.ok(servicio.validarCambioPlaza({}, {motivoOpcional: true}).plaza_id);
+  const sinCama = {...ESTADIA, plaza: null};
+  const ui = await montarCambio(call => (call.method === 'GET' ? response(200, LIBRES) : response(200, {ok: true, mapa: MAPA})), {estadia: sinCama});
+  try {
+    assert.ok(ui.labels().includes('Motivo (opcional)'));
+    await ui.press('Cama A2-03');
+    await ui.pressButton('Cambiar de cama');
+    await confirmar(ui.alerts, 'Cambiar de cama');
+    const post = ui.calls.find(c => c.method === 'POST');
+    assert.equal(post.body.plaza_id, 45);
+    assert.deepEqual(ui.listos, [MAPA]);
+  } finally { await ui.close(); }
+});

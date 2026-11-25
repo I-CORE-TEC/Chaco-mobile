@@ -10,17 +10,28 @@ import {
 import { keyboardDismissModeFor } from '../utils/teclado';
 import { fontSizes, radii } from '../theme';
 
+// Solo informa al padre: un error de su callback no corta la pantalla.
+const avisar = (fn, valor) => {
+  try {
+    fn?.(valor);
+  } catch {
+    // Nada.
+  }
+};
+
 // Cambio de cama (§15, mockup CambioCama.dc.html): una cama libre de `plazas-para-cambio` agrupada por
 // sector, más el motivo. Confirmación antes de mandar; solo online; sin doble envío. Si la cama se ocupó en
 // el medio (400 con error en `plaza_id`) se recarga la lista y se avisa. Props: `{ dispositivoId, edificioId,
 // plaza?, estadia?, onListo(mapa), onCancelar() }`.
-export default function PlazasCambioCamaScreen({ estadia = null, plaza = null, onListo, onCancelar }) {
+export default function PlazasCambioCamaScreen({ estadia = null, plaza = null, onListo, onCancelar, onEnviando, onCambios }) {
   const { theme, typography } = useTheme();
   const { showToast, showAlert } = useToast();
   const estadiaId = estadia?.id ?? plaza?.estadia_id ?? null;
   const persona = estadia?.persona ?? plaza?.persona ?? null;
   const codigoActual = estadia?.plaza?.codigo ?? plaza?.codigo ?? '';
   const sectorActual = estadia?.sector?.nombre ?? '';
+  // Sin cama actual es una asignación: el motivo es opcional.
+  const motivoOpcional = !codigoActual;
   const [sectores, setSectores] = useState(null);
   const [errorCarga, setErrorCarga] = useState('');
   const [plazaId, setPlazaId] = useState(null);
@@ -53,13 +64,14 @@ export default function PlazasCambioCamaScreen({ estadia = null, plaza = null, o
   }, [estadiaId]);
 
   const datos = { plaza_id: plazaId, motivo };
-  const erroresCliente = intentado ? validarCambioPlaza(datos) : {};
+  const erroresCliente = intentado ? validarCambioPlaza(datos, { motivoOpcional }) : {};
   const errorDe = (campo) => [...(erroresCliente[campo] || []), ...(erroresServidor[campo] || [])];
 
   const enviar = async () => {
     if (enviandoRef.current) return;
     enviandoRef.current = true;
     setEnviando(true);
+    avisar(onEnviando, true);
     setAviso('');
     try {
       const r = await intentarAccion(() => cambiarPlaza(estadiaId, datos), 'estadia');
@@ -90,14 +102,18 @@ export default function PlazasCambioCamaScreen({ estadia = null, plaza = null, o
     } finally {
       enviandoRef.current = false;
       if (montado.current) setEnviando(false);
+      avisar(onEnviando, false);
     }
   };
+
+  const hayCambios = plazaId !== null || motivo.trim() !== '';
+  useEffect(() => { avisar(onCambios, hayCambios); }, [hayCambios]);
 
   const confirmar = () => {
     if (enviandoRef.current) return;
     setIntentado(true);
     setErroresServidor({});
-    if (Object.keys(validarCambioPlaza(datos)).length) return;
+    if (Object.keys(validarCambioPlaza(datos, { motivoOpcional })).length) return;
     const nueva = (sectores || []).flatMap((s) => s.plazas).find((p) => String(p.id) === String(plazaId));
     showAlert('Cambiar de cama', `${persona?.nombre || 'La persona'} pasa${codigoActual ? ` de la cama ${codigoActual}` : ''} a la cama ${nueva?.codigo || ''}.`, [
       { text: 'Revisar', style: 'cancel' },
@@ -163,7 +179,7 @@ export default function PlazasCambioCamaScreen({ estadia = null, plaza = null, o
       </View>
 
       <View style={tarjeta}>
-        <Text style={etiqueta}>Motivo del cambio *</Text>
+        <Text style={etiqueta}>{motivoOpcional ? 'Motivo (opcional)' : 'Motivo del cambio *'}</Text>
         <TextInput value={motivo} onChangeText={setMotivo} editable={!enviando} multiline maxLength={500} accessibilityLabel="Motivo del cambio"
           placeholderTextColor={theme.colors.textSoft} style={[...caja(errorDe('motivo').length > 0), styles.areaTexto]} />
         {mensajes(errorDe('motivo'), 'motivo')}

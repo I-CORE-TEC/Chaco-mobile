@@ -40,7 +40,12 @@ export default function PlazasEstadiasScreen({
     const page = mas ? (pagina?.siguiente || 1) : 1;
     if (mas) setCargandoMas(true);
     else if (silencioso) setRefrescando(true);
-    else setCargando(true);
+    else {
+      // Otro filtro: no se muestran las estadías del anterior mientras llega la lista nueva.
+      setCargando(true);
+      setEstadias([]);
+      setPagina(null);
+    }
     try {
       const nueva = await getEstadias(dispositivoId, edificioId, { estado, sector, page });
       if (!montado.current || pedidoVigente.current !== numero) return;

@@ -103,10 +103,11 @@ export const validarEgreso = ({ motivo_egreso_id, destino } = {}) => {
   return errores;
 };
 
-export const validarCambioPlaza = ({ plaza_id, motivo } = {}) => {
+// Si la estadía no tenía cama (es una asignación, no un cambio) el motivo es opcional, como en la web.
+export const validarCambioPlaza = ({ plaza_id, motivo } = {}, { motivoOpcional = false } = {}) => {
   const errores = {};
   if (!presente(plaza_id)) errores.plaza_id = ['Elegí la cama nueva.'];
-  if (!presente(motivo)) errores.motivo = ['Falta el motivo del cambio.'];
+  if (!presente(motivo) && !motivoOpcional) errores.motivo = ['Falta el motivo del cambio.'];
   return errores;
 };
 
