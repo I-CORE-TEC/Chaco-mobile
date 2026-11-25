@@ -19,6 +19,7 @@ export const ACCESOS = [
   { clave: 'relevar', titulo: 'Ingreso de familias', icono: 'people-outline' },
   { clave: 'llegadas', titulo: 'Llegada de familias', icono: 'home-outline' },
   { clave: 'kits', titulo: 'Recepción de kits', icono: 'cube-outline' },
+  { clave: 'plazas', titulo: 'Plazas y estadías', icono: 'bed-outline' },
 ];
 
 const listeners = new Set();
@@ -34,6 +35,8 @@ export const normalizarPerfil = (payload) => {
     relevar: datos.relevar === true,
     llegadas: bandera(datos.llegadas, datos.dispositivo === true),
     kits: bandera(datos.kits, datos.dispositivo === true),
+    // Clave aditiva (Cambio 596): sin ella, un back viejo no muestra la tarjeta.
+    plazas: datos.plazas === true,
   };
 };
 
