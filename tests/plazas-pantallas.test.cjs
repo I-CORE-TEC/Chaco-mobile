@@ -248,3 +248,20 @@ test('Estadías: al cambiar de filtro se vacía la lista y el «Ver más» mient
     await v.toca('Filtrar: Egresadas');
   } finally { await v.cierra(); }
 });
+
+test('Mapa: con bloqueo, «Sacar de servicio» de la hoja va deshabilitado con el texto debajo', async () => {
+  const {r, pantalla} = await preparar();
+  r.setFetch(async () => response(200, MAPA));
+  const conBloqueo = JSON.parse(JSON.stringify(MAPA));
+  conBloqueo.sectores[0].plazas[1] = {...conBloqueo.sectores[0].plazas[1], acciones: ['reservar', 'fuera_servicio'], bloqueo: 'Hay una reserva vigente.'};
+  const normalizado = r.load('./plazasApi').normalizarMapa(conBloqueo);
+  const v = await montar(pantalla('PlazasMapaScreen'), {dispositivoId: 3, edificioId: 9, mapa: normalizado, onMapaActualizado() {}, abrirAccion() {}});
+  try {
+    await v.toca(v.botones().map(b => b.props.accessibilityLabel).find(l => l && l.startsWith('Cama A1-02')));
+    const sacar = v.botones().find(b => b.type === 'CustomButton' && b.props.title === 'Sacar de servicio');
+    assert.equal(sacar.props.disabled, true);
+    assert.ok(v.textos().includes('Hay una reserva vigente.'));
+    const reservar = v.botones().find(b => b.type === 'CustomButton' && b.props.title === 'Reservar');
+    assert.ok(!reservar.props.disabled);
+  } finally { await v.cierra(); }
+});

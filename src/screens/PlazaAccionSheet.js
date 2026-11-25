@@ -32,11 +32,15 @@ const TITULOS = {
 // volver a servicio. Solo muestra lo que viene en `plaza.acciones`. Cada acción pide confirmación, va solo con
 // conexión y no se manda dos veces. Egresar y cambiar de cama tienen su propia pantalla. Props:
 // `{ dispositivoId, edificioId, plaza, onListo(mapa), onCancelar() }` (las acciones responden con el mapa).
-export default function PlazaAccionSheet({ plaza = null, onListo, onCancelar, onEnviando, onCambios }) {
+export default function PlazaAccionSheet({ plaza = null, modoInicial = null, onListo, onCancelar, onEnviando, onCambios }) {
   const { theme, typography } = useTheme();
   const { showToast, showAlert } = useToast();
   const permitidas = accionesDeCama(plaza);
-  const inicial = permitidas.reservar ? 'reservar' : permitidas.prestar ? 'prestar' : null;
+  // `modoInicial`: la acción que se tocó en la hoja del mapa; vale solo si la cama la permite.
+  const pedida = (modoInicial === 'reservar' && permitidas.reservar) || (modoInicial === 'prestar' && permitidas.prestar)
+    || (modoInicial === 'fuera_servicio' && permitidas.fueraServicio && !(typeof plaza?.bloqueo === 'string' && plaza.bloqueo.trim()))
+    ? modoInicial : null;
+  const inicial = pedida || (permitidas.reservar ? 'reservar' : permitidas.prestar ? 'prestar' : null);
   const [modo, setModo] = useState(inicial);
   const [dni, setDni] = useState('');
   const [hasta, setHasta] = useState('');

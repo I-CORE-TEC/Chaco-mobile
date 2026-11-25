@@ -37,6 +37,8 @@ async function montarApp() {
   const p = {};
   const alerts = [];
   const toasts = [];
+  const pedidosMapa = [];
+  const respuestaMapa = {valor: null};
   const stub = nombre => props => { p[nombre] = props; return null; };
   // Cuántas veces se monta cada pantalla (para detectar un bucle de recarga).
   const mocks = {
@@ -67,7 +69,8 @@ async function montarApp() {
     '../screens/PlazasEgresoScreen': {__esModule: true, default: stub('egreso')},
     '../screens/PlazasCambioCamaScreen': {__esModule: true, default: stub('cambio')},
     '../screens/PlazaAccionSheet': {__esModule: true, default: stub('hoja')},
-    '../services/plazasApi': {normalizarMapa: mapa => ({...mapa, normalizado: true})},
+    '../services/plazasApi': {normalizarMapa: mapa => ({...mapa, normalizado: true}),
+      getMapa: async (d, e) => { pedidosMapa.push([d, e]); return respuestaMapa.valor; }},
     '@react-native-community/netinfo': {__esModule: true, default: {addEventListener: () => () => {}}},
     '../services/emergenciaLimpieza': {depurarBorradoresFicha: async () => {}},
     '../services/emergenciaCola': {syncPendientes: async () => ({}), getPendingCount: async () => 0, getResumenPendientes: async () => ({}),
@@ -84,7 +87,7 @@ async function montarApp() {
     edificios: '../screens/PlazasEdificiosScreen', mapa: '../screens/PlazasMapaScreen', estadias: '../screens/PlazasEstadiasScreen',
     egreso: '../screens/PlazasEgresoScreen', cambio: '../screens/PlazasCambioCamaScreen', hoja: '../screens/PlazaAccionSheet',
     inicio: '../screens/EmergenciaInicioScreen'}[nombre]].default).length > 0;
-  return {p, alerts, toasts, hacer, montada, titulo: () => banner().props.title,
+  return {p, alerts, toasts, pedidosMapa, respuestaMapa, hacer, montada, titulo: () => banner().props.title,
     atras: () => hacer(() => banner().props.onBackPress()), close: () => renderer.act(async () => tree.unmount())};
 }
 
@@ -220,5 +223,38 @@ test('Plazas: con algo cargado en la acción, Atrás pide confirmar; sin cambios
     await ui.atras();
     assert.ok(ui.montada('egreso'));
     assert.ok(ui.toasts.length >= 1);
+  } finally { await ui.close(); }
+});
+
+test('Plazas: la acción tocada en la hoja viaja como modoInicial y una segunda apertura no pisa la primera', async () => {
+  const ui = await montarApp();
+  try {
+    await alMapa(ui);
+    await ui.hacer(() => { ui.p.mapa.abrirAccion('prestar', {plaza: PLAZA}); ui.p.mapa.abrirAccion('reservar', {plaza: {...PLAZA, id: 99, codigo: 'Z-99'}}); });
+    assert.ok(ui.montada('hoja'));
+    assert.equal(ui.p.hoja.modoInicial, 'prestar');
+    assert.equal(ui.p.hoja.plaza.id, 41, 'la segunda apertura no reemplaza la acción abierta');
+  } finally { await ui.close(); }
+});
+
+test('Plazas: desde estadías, un mapa descartado se vuelve a pedir y los filtros se conservan', async () => {
+  const ui = await montarApp();
+  try {
+    await alMapa(ui);
+    await ui.hacer(() => ui.p.mapa.onVerEstadias());
+    await ui.hacer(() => ui.p.estadias.onFiltros({estado: 'egresada', sector: 1}));
+    await ui.hacer(() => ui.p.estadias.abrirAccion('reubicar', {estadia: {id: 1}}));
+    ui.respuestaMapa.valor = {...MAPA_9, resumen: {ocupadas: 7}};
+    await ui.hacer(() => ui.p.cambio.onListo({...MAPA_9, edificio: {id: 77}}));
+    assert.ok(ui.montada('estadias'));
+    assert.deepEqual(ui.pedidosMapa, [[3, 9]]);
+    assert.equal(ui.p.estadias.total, 7, 'la solapa «Estadías · N» sale del mapa vuelto a pedir');
+    assert.equal(ui.p.estadias.estadoInicial, 'egresada');
+    assert.equal(ui.p.estadias.sectorInicial, 1);
+    // Con un mapa válido no se pide otro.
+    await ui.hacer(() => ui.p.estadias.abrirAccion('reubicar', {estadia: {id: 1}}));
+    await ui.hacer(() => ui.p.cambio.onListo({...MAPA_9, resumen: {ocupadas: 8}}));
+    assert.equal(ui.pedidosMapa.length, 1);
+    assert.equal(ui.p.estadias.total, 8);
   } finally { await ui.close(); }
 });
