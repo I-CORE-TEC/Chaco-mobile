@@ -883,6 +883,7 @@ async function montarApp() {
     '../screens/PlazasEstadiasScreen': {__esModule: true, default: 'Plazas'},
     '../screens/PlazasEgresoScreen': {__esModule: true, default: () => null},
     '../screens/PlazasCambioCamaScreen': {__esModule: true, default: () => null},
+    '../screens/PlazasIngresoScreen': {__esModule: true, default: () => null},
     '../screens/PlazaAccionSheet': {__esModule: true, default: () => null},
     '../screens/StockEdificiosScreen': {__esModule: true, default: () => null},
     '../screens/StockSaldoScreen': {__esModule: true, default: () => null},

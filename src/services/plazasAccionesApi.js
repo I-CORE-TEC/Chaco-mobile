@@ -34,6 +34,8 @@ export const TEXTO_PLAZA_OCUPADA = 'Esa cama se acaba de ocupar, elegí otra.';
 export const TEXTO_PERSONA_NO_ENCONTRADA = 'No encontramos a esa persona: revisá el DNI.';
 export const TEXTO_SESION = 'La sesión venció: volvé a entrar.';
 export const TEXTO_REINTENTAR = 'No se pudo confirmar si la acción llegó. Actualizá el mapa antes de repetirla.';
+export const TEXTO_INGRESO_CON_ARCHIVO = 'Este ingreso se hace desde el backoffice.';
+export const TEXTO_FORMULARIO_CAMBIO = 'El formulario de ingreso cambió. Volvé a cargarlo.';
 export const TEXTO_VALIDACION = 'El servidor rechazó algunos datos. Corregí lo marcado.';
 
 const presente = (valor) => valor !== null && valor !== undefined && !(typeof valor === 'string' && valor.trim() === '');
@@ -149,7 +151,13 @@ const detalleDe = (error) => {
   return typeof detail === 'string' && detail.trim() ? detail.trim() : null;
 };
 
-// Por status y `code`. `tipo`: sin_red, sesion, sin_modulo, sin_permiso, egreso_con_formulario, persona_no_encontrada,
+const clavesDe = (payload) => {
+  const claves = payload?.claves;
+  if (!claves || typeof claves !== 'object' || Array.isArray(claves)) return {};
+  return Object.fromEntries(Object.entries(claves).filter(([, mensaje]) => typeof mensaje === 'string' && mensaje.trim()));
+};
+
+// Por status y `code`. `tipo`: sin_red, sesion, sin_modulo, sin_permiso, egreso_con_formulario, ingreso_con_archivo, formulario_cambio (409 del ingreso), persona_no_encontrada,
 // validacion (con `errores` por campo; `plazaOcupada` si el error viene en `plaza_id`), no_encontrada (404),
 // reintentable (red, 5xx, 429, WAF) y rechazo. `contexto`: 'cama' | 'estadia' para el texto del 404.
 export const clasificarErrorPlaza = (error, contexto = 'cama') => {
@@ -164,6 +172,8 @@ export const clasificarErrorPlaza = (error, contexto = 'cama') => {
   // 403 sin `code` no es del back (WAF): se trata como falla transitoria, igual que la cola.
   if (status === 403) return { tipo: 'reintentable', mensaje: TEXTO_REINTENTAR };
   if (status === 409 && !html && code === 'EGRESO_CON_FORMULARIO') return { tipo: 'egreso_con_formulario', mensaje: TEXTO_EGRESO_CON_FORMULARIO };
+  if (status === 409 && !html && code === 'INGRESO_CON_ARCHIVO') return { tipo: 'ingreso_con_archivo', mensaje: TEXTO_INGRESO_CON_ARCHIVO };
+  if (status === 409 && !html && code === 'FORMULARIO_CAMBIO') return { tipo: 'formulario_cambio', mensaje: detalle || TEXTO_FORMULARIO_CAMBIO };
   if (status === 404 && !html) {
     return { tipo: 'no_encontrada', mensaje: contexto === 'estadia' ? TEXTO_NO_DISPONIBLE_ESTADIA : TEXTO_NO_DISPONIBLE_CAMA };
   }
@@ -178,6 +188,8 @@ export const clasificarErrorPlaza = (error, contexto = 'cama') => {
       mensaje: detalle || TEXTO_VALIDACION,
       errores: Object.keys(errores).length ? errores : { non_field_errors: [detalle || TEXTO_VALIDACION] },
       plazaOcupada,
+      // Ingreso: `{clave del campo: texto}` para pintar el error en cada campo del formulario.
+      claves: clavesDe(error.payload),
     };
   }
   if (status === 400 && !html) return { tipo: 'rechazo', mensaje: detalle || 'El servidor rechazó la acción.' };

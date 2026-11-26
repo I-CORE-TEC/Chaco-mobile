@@ -25,6 +25,7 @@ import PlazasMapaScreen from '../screens/PlazasMapaScreen';
 import PlazasEstadiasScreen from '../screens/PlazasEstadiasScreen';
 import PlazasEgresoScreen from '../screens/PlazasEgresoScreen';
 import PlazasCambioCamaScreen from '../screens/PlazasCambioCamaScreen';
+import PlazasIngresoScreen from '../screens/PlazasIngresoScreen';
 import PlazaAccionSheet from '../screens/PlazaAccionSheet';
 import StockEdificiosScreen from '../screens/StockEdificiosScreen';
 import StockSaldoScreen from '../screens/StockSaldoScreen';
@@ -80,7 +81,7 @@ const ACCIONES_STOCK = {
   traspasar: { Pantalla: StockTraspasoScreen, titulo: 'Traspasar' },
   ajustar: { Pantalla: StockAjusteScreen, titulo: 'Ajustar saldo' },
 };
-const TITULOS_ACCION_PLAZAS = { egreso: 'Registrar egreso', cambio: 'Cambiar de cama' };
+const TITULOS_ACCION_PLAZAS = { egreso: 'Registrar egreso', cambio: 'Cambiar de cama', ingreso: 'Ingresar persona' };
 const TITULOS_CIERRE = { alojar: 'Familia alojada', diferencia: 'Cerrar con diferencia', cancelar: 'Cancelar ingreso' };
 // Las vistas que se vuelven a pedir con el botón de sincronizar del Banner.
 const VISTAS_RECARGABLES = ['inicio', 'kits_dispositivos', 'kits_entregas', 'llegadas_dispositivos', 'llegadas_integrantes', 'llegadas_ficha',
@@ -386,12 +387,12 @@ export default function EmergenciaApp({ onCambiarModulo }) {
     showToast({ type: 'warning', message: 'Ese edificio ya no está entre los tuyos. Se recargó la lista.' });
     verEdificiosPlazas({ sinEntrarDirecto: true });
   };
-  const abrirAccionPlazas = (accion, { plaza = null, estadia = null } = {}) => {
-    const tipo = accion === 'egresar' ? 'egreso' : accion === 'reubicar' ? 'cambio' : 'hoja';
+  const abrirAccionPlazas = (accion, { plaza = null, estadia = null, sector = null } = {}) => {
+    const tipo = accion === 'egresar' ? 'egreso' : accion === 'reubicar' ? 'cambio' : accion === 'ingresar' ? 'ingreso' : 'hoja';
     // Una sola apertura: un segundo toque (o la acción de otra vista) no pisa la que ya está abierta.
     setPantalla((actual) => {
       if (actual.vista === 'plazas_accion') return actual;
-      return { ...actual, vista: 'plazas_accion', accion: { tipo, plaza, estadia, modo: accion, origen: actual.vista } };
+      return { ...actual, vista: 'plazas_accion', accion: { tipo, plaza, estadia, sector, modo: accion, origen: actual.vista } };
     });
   };
   const volverDeAccionPlazas = () => {
@@ -730,11 +731,11 @@ export default function EmergenciaApp({ onCambiarModulo }) {
             abrirAccion={abrirAccionPlazas} recarga={recarga} onNoEncontrado={edificioNoEncontrado} onSinModulo={sinModulo} />
         ) : null}
         {pestana === 'inicio' && vista === 'plazas_accion' ? (() => {
-          const { tipo, plaza, estadia, modo } = pantalla.accion || {};
-          const Pantalla = tipo === 'egreso' ? PlazasEgresoScreen : tipo === 'cambio' ? PlazasCambioCamaScreen : PlazaAccionSheet;
+          const { tipo, plaza, estadia, sector, modo } = pantalla.accion || {};
+          const Pantalla = tipo === 'egreso' ? PlazasEgresoScreen : tipo === 'cambio' ? PlazasCambioCamaScreen : tipo === 'ingreso' ? PlazasIngresoScreen : PlazaAccionSheet;
           return (
             <Pantalla key={`accion-${tipo}-${plaza?.id ?? estadia?.id}`}
-              dispositivoId={pantalla.edificio?.dispositivoId} edificioId={pantalla.edificio?.edificioId} plaza={plaza} estadia={estadia} modoInicial={modo}
+              dispositivoId={pantalla.edificio?.dispositivoId} edificioId={pantalla.edificio?.edificioId} plaza={plaza} estadia={estadia} sector={sector} modoInicial={modo}
               onListo={terminarAccionPlazas} onCancelar={volverDeAccionPlazas}
               onEnviando={setEnviando} onCambios={marcarCambios('plazas_accion')} />
           );

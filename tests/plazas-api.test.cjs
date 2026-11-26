@@ -106,7 +106,8 @@ test('detalle de la cama: desde/hasta, sin fila de bloqueo (lo muestra la hoja d
 test('acciones: solo las conocidas y con sus textos del mockup', async () => {
   const {p} = await preparar();
   igual(p.accionesDePlaza({acciones: ['egresar', 'reubicar', 'fuera_servicio', 'ingresar']}).map((a) => a.titulo),
-    ['Registrar egreso', 'Cambiar de cama', 'Sacar de servicio']);
+    ['Ingresar persona', 'Registrar egreso', 'Cambiar de cama', 'Sacar de servicio']);
+  igual(p.accionesDePlaza({acciones: ['reservar', 'ingresar']}).map((a) => a.accion), ['ingresar', 'reservar'], 'ingresar va primero');
   igual(p.accionesDeEstadia({acciones: ['egresar', 'reubicar']}).map((a) => a.titulo), ['Egreso', 'Cambiar de cama']);
   igual(p.accionesDePlaza({}), []);
   igual(p.accionesDeEstadia({acciones: 'egresar'}), []);
