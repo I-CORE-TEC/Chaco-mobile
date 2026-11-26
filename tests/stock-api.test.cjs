@@ -111,7 +111,7 @@ test('clasificarError: cada code y status del contrato, con texto en español y 
   igual(s.clasificarError({status: 404, payload: {detail: 'No encontrado.'}}),
     {tipo: 'no_encontrado', mensaje: 'Ese edificio ya no está entre los tuyos o su institución dejó de llevar stock.'});
   // 400 VALIDACION: solo con el code.
-  igual(s.clasificarError({status: 400, payload: {code: 'VALIDACION', detail: 'cursor inválido'}}), {tipo: 'validacion', mensaje: 'cursor inválido'});
+  igual(s.clasificarError({status: 400, payload: {code: 'VALIDACION', detail: 'cursor inválido'}}), {tipo: 'validacion', mensaje: 'cursor inválido', errores: {}});
   assert.match(s.clasificarError({status: 400, payload: {code: 'VALIDACION'}}).mensaje, /filtro de movimientos/);
   assert.equal(s.clasificarError({status: 400, payload: {detail: 'x'}}).tipo, 'otro');
   // 429 con Retry-After.

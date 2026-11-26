@@ -33,14 +33,16 @@ function loadApp(mocks) {
   return module.exports;
 }
 
-async function montarApp() {
+async function montarApp({perfilGuardado = null} = {}) {
   const p = {};
+  const listeners = new Set();
   const alerts = [];
   const toasts = [];
   const stub = nombre => props => { p[nombre] = props; return null; };
   const pantallas = {
     inicio: '../screens/EmergenciaInicioScreen', stockEdificios: '../screens/StockEdificiosScreen', stockSaldo: '../screens/StockSaldoScreen',
-    plazas: '../screens/PlazasEdificiosScreen',
+    plazas: '../screens/PlazasEdificiosScreen', entregar: '../screens/StockEntregaScreen', ingresar: '../screens/StockIngresoScreen',
+    traspasar: '../screens/StockTraspasoScreen', ajustar: '../screens/StockAjusteScreen',
   };
   const mocks = {
     react: React, 'react-native': native,
@@ -55,7 +57,16 @@ async function montarApp() {
     [pantallas.stockEdificios]: {__esModule: true, default: stub('stockEdificios')},
     [pantallas.stockSaldo]: {__esModule: true, default: stub('stockSaldo')},
     [pantallas.plazas]: {__esModule: true, default: stub('plazas')},
+    [pantallas.entregar]: {__esModule: true, default: stub('entregar')},
+    [pantallas.ingresar]: {__esModule: true, default: stub('ingresar')},
+    [pantallas.traspasar]: {__esModule: true, default: stub('traspasar')},
+    [pantallas.ajustar]: {__esModule: true, default: stub('ajustar')},
     '../services/plazasApi': {normalizarMapa: mapa => mapa, getMapa: async () => null},
+    // El perfil llega por subscribePerfil (no por Inicio): `emitirPerfil` es lo que hace el back al contestar.
+    '../services/emergenciaPerfil': {getPerfilGuardado: async () => perfilGuardado, subscribePerfil: listener => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    }},
     '@react-native-community/netinfo': {__esModule: true, default: {addEventListener: () => () => {}}},
     '../services/emergenciaLimpieza': {depurarBorradoresFicha: async () => {}},
     '../services/emergenciaCola': {syncPendientes: async () => ({}), getPendingCount: async () => 0, getResumenPendientes: async () => ({}),
@@ -78,7 +89,9 @@ async function montarApp() {
   const montada = nombre => tree.root.findAll(n => n.type === mocks[pantallas[nombre]].default).length > 0;
   return {p, alerts, toasts, hacer, montada, modulo, banner, barra,
     items: () => Array.from(barra().props.items, i => i.id + ':' + i.label),
-    perfil: valor => hacer(() => p.inicio.onPerfil(valor)),
+    // Por subscribePerfil, con Inicio montado o no (en la pestaña Stock no lo está).
+    perfil: valor => hacer(() => listeners.forEach(listener => listener(valor))),
+    listeners: () => listeners.size,
     pestana: id => hacer(() => barra().props.onTabPress(id)),
     atras: () => hacer(() => banner().props.onBackPress()), close: () => renderer.act(async () => tree.unmount())};
 }
@@ -147,8 +160,72 @@ test('Stock: un 403 SIN_MODULO o un 404 del saldo sacan de la pantalla; si el pe
     assert.equal(ui.alerts[0][1], 'Sin permiso de stock');
     await ui.pestana('stock');
     assert.ok(ui.montada('stockEdificios'));
+    assert.equal(ui.montada('inicio'), false, 'en la pestaña Stock, Inicio no está montado: el perfil no puede venir de él');
     await ui.perfil({stock: false});
     assert.ok(ui.montada('inicio') && !ui.montada('stockEdificios'));
     assert.deepEqual(ui.items(), ['inicio:Inicio', 'cuenta:Cuenta']);
+  } finally { await ui.close(); }
+});
+
+test('Stock: el perfil guardado al montar habilita la pestaña sin esperar a Inicio, y al desmontar se deja de escuchar', async () => {
+  const ui = await montarApp({perfilGuardado: {stock: true}});
+  await ui.hacer(async () => {});
+  assert.deepEqual(ui.items(), ['inicio:Inicio', 'stock:Stock', 'cuenta:Cuenta']);
+  assert.equal(ui.listeners(), 1);
+  await ui.close();
+  assert.equal(ui.listeners(), 0);
+});
+
+test('Stock: desde el saldo, cada acción abre su pantalla sobre el mismo edificio; Atrás, cancelar y «listo» vuelven al saldo', async () => {
+  const ui = await montarApp();
+  try {
+    await ui.perfil({stock: true});
+    await ui.pestana('stock');
+    await ui.hacer(() => ui.p.stockEdificios.onElegir(PAR));
+    for (const [accion, titulo] of [['entregar', 'Entregar a una persona'], ['ingresar', 'Ingresar stock'], ['traspasar', 'Traspasar'], ['ajustar', 'Ajustar saldo']]) {
+      await ui.hacer(() => ui.p.stockSaldo.onAccion(accion));
+      assert.ok(ui.montada(accion) && !ui.montada('stockSaldo'), accion);
+      assert.equal(ui.banner().props.title, titulo);
+      assert.deepEqual([ui.p[accion].dispositivoId, ui.p[accion].edificioId], [7, 3]);
+      await ui.atras();
+      assert.ok(ui.montada('stockSaldo') && !ui.montada(accion), 'Atrás vuelve al saldo');
+      assert.deepEqual([ui.p.stockSaldo.dispositivoId, ui.p.stockSaldo.edificioId], [7, 3]);
+    }
+    await ui.hacer(() => ui.p.stockSaldo.onAccion('entregar'));
+    await ui.hacer(() => ui.p.entregar.onListo({id: 91}));
+    assert.ok(ui.montada('stockSaldo'), 'hecha: de vuelta al saldo, que se monta de nuevo y se vuelve a pedir');
+    await ui.hacer(() => ui.p.stockSaldo.onAccion('ajustar'));
+    await ui.hacer(() => ui.p.ajustar.onCancelar());
+    assert.ok(ui.montada('stockSaldo'));
+    await ui.hacer(() => ui.p.stockSaldo.onAccion('no-existe'));
+    assert.ok(ui.montada('stockSaldo'), 'una acción desconocida no cambia nada');
+  } finally { await ui.close(); }
+});
+
+test('Stock: con una escritura en curso Atrás no sale; con lo cargado pide confirmar; 404 y SIN_MODULO sacan de la acción', async () => {
+  const ui = await montarApp();
+  try {
+    await ui.perfil({stock: true});
+    await ui.pestana('stock');
+    await ui.hacer(() => ui.p.stockEdificios.onElegir(PAR));
+    await ui.hacer(() => ui.p.stockSaldo.onAccion('traspasar'));
+    await ui.hacer(() => ui.p.traspasar.onEnviando(true));
+    await ui.atras();
+    assert.ok(ui.montada('traspasar'), 'enviando: no se sale');
+    assert.equal(ui.toasts.length, 1);
+    await ui.hacer(() => ui.p.traspasar.onEnviando(false));
+    await ui.hacer(() => ui.p.traspasar.onCambios(true));
+    await ui.atras();
+    assert.ok(ui.montada('traspasar'), 'con lo cargado pide confirmar');
+    assert.equal(ui.alerts.at(-1)[0], '¿Salir sin enviar?');
+    await ui.hacer(() => ui.alerts.at(-1)[2].find(b => b.text === 'Salir').onPress());
+    assert.ok(ui.montada('stockSaldo'));
+    await ui.hacer(() => ui.p.stockSaldo.onAccion('ingresar'));
+    await ui.hacer(() => ui.p.ingresar.onNoEncontrado());
+    assert.ok(ui.montada('stockEdificios'), '404: a la lista de edificios');
+    await ui.hacer(() => ui.p.stockEdificios.onElegir(PAR));
+    await ui.hacer(() => ui.p.stockSaldo.onAccion('ajustar'));
+    await ui.hacer(() => ui.p.ajustar.onSinModulo('Sin stock'));
+    assert.ok(ui.montada('inicio'));
   } finally { await ui.close(); }
 });

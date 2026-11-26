@@ -417,7 +417,7 @@ export default function EmergenciaRecibirEntregaScreen({ entrega, dispositivoId 
             const elegido = String(edificioId) === String(edificio.id);
             return (
               <Pressable key={String(edificio.id)} accessibilityRole="radio" accessibilityLabel={edificio.nombre}
-                accessibilityState={{ selected: elegido, disabled: bloqueada }} disabled={bloqueada} onPress={() => elegirEdificio(edificio.id)}
+                accessibilityState={{ selected: elegido, checked: elegido, disabled: bloqueada }} disabled={bloqueada} onPress={() => elegirEdificio(edificio.id)}
                 style={[styles.opcionEdificio, { borderColor: elegido ? theme.colors.primary : theme.colors.border }]}>
                 <Ionicons name={elegido ? 'radio-button-on' : 'radio-button-off'} size={22}
                   color={elegido ? theme.colors.primary : theme.colors.textSoft} accessible={false} importantForAccessibility="no" />

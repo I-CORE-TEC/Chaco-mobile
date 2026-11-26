@@ -17,8 +17,7 @@ export const AVISO_DESACTUALIZADO = 'No se pudo actualizar: se muestran tus acce
 // para que el Banner lo muestre (RN Web no dibuja el RefreshControl).
 export const SOLO_STOCK = 'Tenés acceso a Stock desde la barra de abajo.';
 
-// `onPerfil(perfil)`: el perfil vigente (guardado o del back), para que el módulo arme la barra inferior.
-export default function EmergenciaInicioScreen({ onAbrir, recarga = 0, onCargando, onPerfil }) {
+export default function EmergenciaInicioScreen({ onAbrir, recarga = 0, onCargando }) {
   const { theme, typography } = useTheme();
   const [perfil, setPerfil] = useState(null);
   const [desdeCache, setDesdeCache] = useState(false);
@@ -77,7 +76,6 @@ export default function EmergenciaInicioScreen({ onAbrir, recarga = 0, onCargand
   }, [cargar]);
 
   useEffect(() => { if (recarga) cargar({ silencioso: true }); }, [recarga, cargar]);
-  useEffect(() => { if (perfil && onPerfil) onPerfil(perfil); }, [perfil]);
 
   const accesos = accesosDelPerfil(perfil);
 

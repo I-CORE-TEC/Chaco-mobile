@@ -13,10 +13,20 @@ import { fontSizes, radii } from '../theme';
 export const SIN_SALDOS = 'Este edificio no tiene insumos con saldo.';
 export const SIN_MOVIMIENTOS = 'Todavía no hay movimientos en este edificio.';
 
+// Las acciones de escritura que ofrece el edificio, según `puede` (§17): solo las que vienen en true. Traspasar
+// va con `ingresar` (§17.1: `stock.ingresar` en el origen y en el destino).
+export const accionesDe = (puede) => [
+  puede?.entregar === true ? { id: 'entregar', titulo: 'Entregar a una persona', icono: 'person-add-outline' } : null,
+  puede?.ingresar === true ? { id: 'ingresar', titulo: 'Ingresar stock', icono: 'add-circle-outline' } : null,
+  puede?.ingresar === true ? { id: 'traspasar', titulo: 'Traspasar a otro edificio', icono: 'swap-horizontal-outline' } : null,
+  puede?.ajustar === true ? { id: 'ajustar', titulo: 'Ajustar saldo', icono: 'create-outline' } : null,
+].filter(Boolean);
+
 // Stock · saldo por insumo de un edificio (GET .../stock/) y su libro de movimientos (GET .../stock/movimientos/),
-// de a 50 con «Cargar más» por cursor. Solo lectura. `onNoEncontrado()`: 404 (el edificio ya no es del usuario);
+// de a 50 con «Cargar más» por cursor. `onAccion(id)` abre la escritura elegida (entregar, ingresar, traspasar, ajustar).
+// `onNoEncontrado()`: 404 (el edificio ya no es del usuario);
 // `onSinModulo(mensaje)`: 403 SIN_MODULO. `recarga` cambia cuando hay que volver a pedir todo.
-export default function StockSaldoScreen({ dispositivoId, edificioId, onNoEncontrado, onSinModulo, recarga = 0 }) {
+export default function StockSaldoScreen({ dispositivoId, edificioId, onAccion, onNoEncontrado, onSinModulo, recarga = 0 }) {
   const { theme, typography } = useTheme();
   const [saldo, setSaldo] = useState(null);
   const [movimientos, setMovimientos] = useState([]);
@@ -160,6 +170,16 @@ export default function StockSaldoScreen({ dispositivoId, edificioId, onNoEncont
             <Text accessibilityRole="header" style={titulo}>{saldo.edificio.nombre || saldo.dispositivo.nombre}</Text>
             {saldo.edificio.nombre && saldo.dispositivo.nombre ? <Text style={sub}>{saldo.dispositivo.nombre}</Text> : null}
           </View>
+
+          {accionesDe(saldo.puede).length ? (
+            <View style={tarjeta}>
+              <Text accessibilityRole="header" style={titulo}>Acciones</Text>
+              {accionesDe(saldo.puede).map((accion) => (
+                <CustomButton key={accion.id} title={accion.titulo} variant={accion.id === 'entregar' ? 'primary' : 'secondary'} iconLeft={accion.icono}
+                  onPress={() => onAccion?.(accion.id)} />
+              ))}
+            </View>
+          ) : null}
 
           <View style={tarjeta}>
             <Text accessibilityRole="header" style={titulo}>Saldo por insumo</Text>
