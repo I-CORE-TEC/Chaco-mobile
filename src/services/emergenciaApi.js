@@ -179,14 +179,16 @@ export const getEntrega = (entregaId) => conVerificacion(() => becasRequest(RUTA
 
 // §12. `cantidades` es { <id del ítem>: cantidad }, una por línea aunque sea 0; va como
 // `cantidades[<id>]`. `remito` es el asset de aJpeg. Requiere conexión: no se encola.
-// `token`: el de la sesión con la que se abrió la recepción (no se relee).
-export const recibirEntrega = async (entregaId, { uuid_cliente, cantidades = {}, remito, observacion } = {}, { timeoutMs, token } = {}) => {
+// `edificio_id`: solo si la entrega trae `requiere_edificio` (§10): en qué edificio se recibe; sin él, el
+// cuerpo sale como siempre. `token`: el de la sesión con la que se abrió la recepción (no se relee).
+export const recibirEntrega = async (entregaId, { uuid_cliente, cantidades = {}, remito, observacion, edificio_id } = {}, { timeoutMs, token } = {}) => {
   exigirUuid(uuid_cliente);
   const fields = { uuid_cliente };
   Object.entries(cantidades || {}).forEach(([item, cantidad]) => {
     if (presente(cantidad)) fields[`cantidades[${item}]`] = cantidad;
   });
   if (presente(observacion)) fields.observacion = observacion;
+  if (presente(edificio_id)) fields.edificio_id = edificio_id;
   const files = [archivoJpeg('remito', remito)].filter(Boolean);
   return conVerificacion(() => uploadMultipart(RUTAS.recibirEntrega(entregaId), { fields, files, timeoutMs, token }));
 };

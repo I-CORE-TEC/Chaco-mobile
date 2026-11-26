@@ -37,6 +37,8 @@ export const normalizarPerfil = (payload) => {
     kits: bandera(datos.kits, datos.dispositivo === true),
     // Clave aditiva (Cambio 596): sin ella, un back viejo no muestra la tarjeta.
     plazas: datos.plazas === true,
+    // Clave aditiva (PR 7a): habilita la pestaña «Stock» de la barra inferior (§17).
+    stock: datos.stock === true,
   };
 };
 

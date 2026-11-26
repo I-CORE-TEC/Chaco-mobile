@@ -69,6 +69,8 @@ async function montarApp() {
     '../screens/PlazasEgresoScreen': {__esModule: true, default: stub('egreso')},
     '../screens/PlazasCambioCamaScreen': {__esModule: true, default: stub('cambio')},
     '../screens/PlazaAccionSheet': {__esModule: true, default: stub('hoja')},
+    '../screens/StockEdificiosScreen': {__esModule: true, default: () => null},
+    '../screens/StockSaldoScreen': {__esModule: true, default: () => null},
     '../services/plazasApi': {normalizarMapa: mapa => ({...mapa, normalizado: true}),
       getMapa: async (d, e) => { pedidosMapa.push([d, e]); return respuestaMapa.valor; }},
     '@react-native-community/netinfo': {__esModule: true, default: {addEventListener: () => () => {}}},

@@ -28,6 +28,7 @@ export const TEXTO_SESION = 'La sesión venció: volvé a entrar. La recepción 
 export const FALTA_CANTIDAD = 'Falta la cantidad: poné 0 si no llegó nada.';
 export const CANTIDAD_INVALIDA = 'Tiene que ser un número entero, 0 o más.';
 export const FALTA_REMITO = 'Falta la foto del remito.';
+export const FALTA_EDIFICIO = 'Elegí en qué edificio se recibe.';
 export const MAX_DIGITOS_CANTIDAD = 6;
 export const MAX_OBSERVACION = 1000;
 
@@ -75,7 +76,20 @@ export const normalizarEntrega = (entrega) => {
     despachada_en: entrega.despachada_en || null,
     observacion_mesa: textoPlano(entrega.observacion_mesa).trim(),
     lineas,
+    // §10 (PR 7a): con `requiere_edificio` hay que elegir uno de `edificios` al recibir.
+    requiere_edificio: entrega.requiere_edificio === true,
+    edificios: (Array.isArray(entrega.edificios) ? entrega.edificios : [])
+      .filter((edificio) => edificio && edificio.id != null)
+      .map((edificio) => ({ id: edificio.id, nombre: textoPlano(edificio.nombre) || `Edificio ${edificio.id}` })),
   };
+};
+
+// El edificio que se manda en la recepción: solo si la entrega lo pide y el elegido sigue entre los
+// edificios de la entrega. Si no, null (el cuerpo sale sin `edificio_id`, como antes).
+export const edificioDeRecepcion = (entrega, edificioId) => {
+  if (!entrega?.requiere_edificio || edificioId == null || edificioId === '') return null;
+  const elegido = (entrega.edificios || []).find((edificio) => String(edificio.id) === String(edificioId));
+  return elegido ? elegido.id : null;
 };
 
 export const normalizarEntregas = (lista) => (Array.isArray(lista) ? lista : []).map(normalizarEntrega).filter(Boolean);
@@ -126,7 +140,7 @@ export const textoDeDiferencia = ({ nombre, enviada, recibida }) => {
 // Validación de cliente antes de mandar. { lineas: { <item>: mensaje }, remito: [..] }. Con un
 // intento `incierto` el remito no hace falta: el reenvío con el mismo uuid no se vuelve a validar
 // (§12, «ni siquiera hace falta el remito»).
-export const validarRecepcion = ({ entrega, cantidades = {}, remito = null, incierto = false } = {}) => {
+export const validarRecepcion = ({ entrega, cantidades = {}, remito = null, incierto = false, edificioId = null } = {}) => {
   const errores = {};
   const lineas = {};
   (entrega?.lineas || []).forEach((linea) => {
@@ -135,6 +149,8 @@ export const validarRecepcion = ({ entrega, cantidades = {}, remito = null, inci
   });
   if (Object.keys(lineas).length) errores.lineas = lineas;
   if (!incierto && !remito?.uri && !remito?.file) errores.remito = [FALTA_REMITO];
+  // Como el remito, un reenvío incierto no vuelve a validar el edificio (§12, «Idempotencia»).
+  if (!incierto && entrega?.requiere_edificio && edificioDeRecepcion(entrega, edificioId) === null) errores.edificio = [FALTA_EDIFICIO];
   return errores;
 };
 
@@ -154,6 +170,8 @@ export const erroresDeRecepcion = (payload) => {
       errores.lineas = { ...(errores.lineas || {}), [linea[1]]: mensajes };
     } else if (['cantidades', 'remito', 'observacion'].includes(clave)) {
       errores[clave] = mensajes;
+    } else if (clave === 'edificio_id') {
+      errores.edificio = mensajes;
     } else {
       errores.generales = [...(errores.generales || []), ...mensajes];
     }
@@ -311,23 +329,26 @@ export const abrirRecepcion = async (entrega, dispositivoId = null) => {
       const cantidades = Object.fromEntries(Object.keys(iniciales)
         .map((item) => [item, typeof previa.cantidades?.[item] === 'string' ? previa.cantidades[item] : iniciales[item]]));
       todas[id] = { ...previa, cantidades, dispositivo: previa.dispositivo ?? dispositivoId, numero: previa.numero || entrega.numero };
+      // Una recepción guardada antes del edificio no trae `edificio_id`: queda sin elegir y se manda como antes.
       return { owner, token, uuid_cliente: previa.uuid_cliente, dispositivo: todas[id].dispositivo, numero: todas[id].numero,
-        cantidades, observacion: textoPlano(previa.observacion), ...estadoDe(previa), recuperada: true };
+        cantidades, observacion: textoPlano(previa.observacion), edificio_id: edificioDeRecepcion(entrega, previa.edificio_id),
+        ...estadoDe(previa), recuperada: true };
     }
     todas[id] = { uuid_cliente: crearUuid(), dispositivo: dispositivoId, numero: entrega.numero, cantidades: iniciales, observacion: '' };
     return { owner, token, uuid_cliente: todas[id].uuid_cliente, dispositivo: dispositivoId, numero: entrega.numero,
-      cantidades: iniciales, observacion: '', ...estadoDe(null), recuperada: false };
+      cantidades: iniciales, observacion: '', edificio_id: null, ...estadoDe(null), recuperada: false };
   });
 };
 
 // Guarda lo tipeado. No crea una recepción que no existe, ni toca una incierta o con uuid en uso.
-export const guardarRecepcion = (owner, entregaId, { cantidades, observacion } = {}) => modificar(owner, (todas) => {
+export const guardarRecepcion = (owner, entregaId, { cantidades, observacion, edificio_id } = {}) => modificar(owner, (todas) => {
   const actual = todas[String(entregaId)];
   if (!actual || actual.incierto || actual.uuid_en_uso) return false;
   todas[String(entregaId)] = {
     ...actual,
     ...(cantidades ? { cantidades: { ...cantidades } } : {}),
     ...(typeof observacion === 'string' ? { observacion } : {}),
+    ...(edificio_id != null ? { edificio_id } : {}),
   };
   return true;
 });
@@ -432,12 +453,14 @@ const cantidadesDistintas = (entrega, enviadas, respuesta) => {
 // - 409 de estado y 404 la cierran; con un 409 RECIBIDA* después de un intento incierto o
 //   descartado se consulta §11 por si la recepción registrada es la propia.
 // - red, timeout, 5xx, 429, 401, otros: incierta.
-export const enviarRecepcion = async ({ entrega, recepcion, cantidades = {}, remito = null, observacion = '' }) => {
+export const enviarRecepcion = async ({ entrega, recepcion, cantidades = {}, remito = null, observacion = '', edificioId = null }) => {
   const id = String(entrega.id);
   const { owner, token, uuid_cliente: uuid } = recepcion;
   const guardada = (await enOrden(() => leerTodas(owner)))[id];
   const previo = estadoDe(guardada);
-  const errores = validarRecepcion({ entrega, cantidades, remito, incierto: previo.incierto });
+  // Lo elegido en pantalla; si no vino, lo guardado con la recepción (un reintento incierto no cambia nada).
+  const elegido = edificioId ?? guardada?.edificio_id ?? null;
+  const errores = validarRecepcion({ entrega, cantidades, remito, incierto: previo.incierto, edificioId: elegido });
   if (hayErroresRecepcion(errores)) {
     throw crearError('VALIDACION_LOCAL', 'Hay datos para corregir.', { clasificacion: { tipo: 'validacion', mensaje: 'Corregí lo marcado.', errores }, recepcion: previo });
   }
@@ -449,6 +472,7 @@ export const enviarRecepcion = async ({ entrega, recepcion, cantidades = {}, rem
   }
   const numeros = armarCantidades(entrega, cantidades);
   const nota = String(observacion || '').trim();
+  const edificio = edificioDeRecepcion(entrega, elegido);
   // Reenvío de un intento incierto: el back no vuelve a validar (§12), así que va sin foto (un 413
   // de la foto no lo trabaría otra vez).
   const archivo = previo.incierto ? null : remito;
@@ -461,6 +485,7 @@ export const enviarRecepcion = async ({ entrega, recepcion, cantidades = {}, rem
       uuid_cliente: uuid,
       cantidades: { ...cantidades },
       observacion: String(observacion || ''),
+      ...(edificio !== null ? { edificio_id: edificio } : {}),
       incierto: true,
     };
   });
@@ -469,7 +494,7 @@ export const enviarRecepcion = async ({ entrega, recepcion, cantidades = {}, rem
     if (todas[id]) Object.assign(todas[id], cambios);
   });
   try {
-    const respuesta = await recibirEntrega(entrega.id, { uuid_cliente: uuid, cantidades: numeros, remito: archivo, observacion: nota },
+    const respuesta = await recibirEntrega(entrega.id, { uuid_cliente: uuid, cantidades: numeros, remito: archivo, observacion: nota, ...(edificio !== null ? { edificio_id: edificio } : {}) },
       { timeoutMs: timeoutDelEnvio(bytesDe(archivo)), token });
     await cerrarRecepcion(owner, entrega.id);
     return { ...resultadoDeRecepcion(respuesta, entrega), distintas: cantidadesDistintas(entrega, numeros, respuesta) };

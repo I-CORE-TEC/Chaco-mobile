@@ -26,6 +26,8 @@ import PlazasEstadiasScreen from '../screens/PlazasEstadiasScreen';
 import PlazasEgresoScreen from '../screens/PlazasEgresoScreen';
 import PlazasCambioCamaScreen from '../screens/PlazasCambioCamaScreen';
 import PlazaAccionSheet from '../screens/PlazaAccionSheet';
+import StockEdificiosScreen from '../screens/StockEdificiosScreen';
+import StockSaldoScreen from '../screens/StockSaldoScreen';
 import { getMapa, normalizarMapa } from '../services/plazasApi';
 import {
   descartar, getBorradorEnCurso, getLocalidadesGuardadas, getPendingCount, getResumenPendientes, reintentar, syncPendientes,
@@ -35,10 +37,12 @@ import { depurarBorradoresFicha } from '../services/emergenciaLimpieza';
 
 // Entradas de la barra inferior de Emergencia. Los accesos de cada perfil (ingreso, llegadas, kits) siguen
 // dentro de Inicio, filtrados por el perfil como antes.
-const PESTANAS = [
-  { id: 'inicio', label: 'Inicio', icon: 'home-outline', activeIcon: 'home' },
-  { id: 'cuenta', label: 'Cuenta', icon: 'person-circle-outline', activeIcon: 'person-circle' },
-];
+const PESTANA_INICIO = { id: 'inicio', label: 'Inicio', icon: 'home-outline', activeIcon: 'home' };
+const PESTANA_STOCK = { id: 'stock', label: 'Stock', icon: 'cube-outline', activeIcon: 'cube' };
+const PESTANA_CUENTA = { id: 'cuenta', label: 'Cuenta', icon: 'person-circle-outline', activeIcon: 'person-circle' };
+// «Stock» solo está si el perfil lo habilita (`perfil.stock`, §3 y §17): quien no lleva stock no la ve.
+export const pestanasDelPerfil = (perfil) => (perfil?.stock === true
+  ? [PESTANA_INICIO, PESTANA_STOCK, PESTANA_CUENTA] : [PESTANA_INICIO, PESTANA_CUENTA]);
 
 const SYNC_INTERVAL_MS = 8000;
 const RECONNECT_DELAY_MS = 1800;
@@ -60,14 +64,17 @@ const TITULOS = {
   plazas_mapa: 'Plazas y estadías',
   plazas_estadias: 'Plazas y estadías',
   plazas_accion: 'Plazas y estadías',
+  stock_edificios: 'Stock',
+  stock_saldo: 'Stock',
 };
 const TITULOS_ACCION_PLAZAS = { egreso: 'Registrar egreso', cambio: 'Cambiar de cama' };
 const TITULOS_CIERRE = { alojar: 'Familia alojada', diferencia: 'Cerrar con diferencia', cancelar: 'Cancelar ingreso' };
 // Las vistas que se vuelven a pedir con el botón de sincronizar del Banner.
 const VISTAS_RECARGABLES = ['inicio', 'kits_dispositivos', 'kits_entregas', 'llegadas_dispositivos', 'llegadas_integrantes', 'llegadas_ficha',
-  'plazas_edificios', 'plazas_mapa', 'plazas_estadias'];
+  'plazas_edificios', 'plazas_mapa', 'plazas_estadias', 'stock_edificios', 'stock_saldo'];
 const VISTAS_M1 = ['envios', 'formulario'];
 const INICIO = { vista: 'inicio', uuid: null };
+const STOCK_INICIO = { vista: 'stock_edificios' };
 // Las pantallas con algo cargado que Atrás no tiene que perder en silencio: piden confirmar. Cada una avisa
 // con `onCambios(bool)` si hay algo sin mandar; el texto dice qué pasa con lo cargado.
 const TEXTO_SALIR_PERDIENDO = 'Lo que cargaste no se mandó. Si salís, se pierde.';
@@ -121,6 +128,8 @@ export default function EmergenciaApp({ onCambiarModulo }) {
   const [recarga, setRecarga] = useState(0);
   const [plazasMapa, setPlazasMapa] = useState(null);
   const edificioActual = useRef(null); // el edificio abierto AHORA (las respuestas tardías lo comparan)
+  // El perfil que trae Inicio (el guardado primero, el del back después): decide las pestañas de la barra.
+  const [perfil, setPerfil] = useState(null);
   const [cargandoPerfil, setCargandoPerfil] = useState(false);
   const [sincronizando, setSincronizando] = useState(false);
   const [pendientes, setPendientes] = useState(0);
@@ -312,6 +321,7 @@ export default function EmergenciaApp({ onCambiarModulo }) {
   const sinModulo = (mensaje) => {
     setEnviando(false);
     showAlert('Sin permiso', mensaje, [{ text: 'Entendido' }]);
+    setPestana('inicio');
     setPantalla(INICIO);
   };
   const dispositivoNoEncontrado = () => {
@@ -389,6 +399,18 @@ export default function EmergenciaApp({ onCambiarModulo }) {
     }
     setRecarga((valor) => valor + 1);
     volverDeAccionPlazas();
+  };
+
+  // ---- Stock (lectura) ----
+  // Pestaña propia de la barra inferior: lista de pares institución · edificio -> saldo y movimientos del elegido.
+  // `par` = { dispositivoId, edificioId, nombre }. Atrás desde el saldo vuelve a la lista; desde la lista, al inicio.
+  const elegirParStock = (item) => setPantalla({
+    vista: 'stock_saldo',
+    par: { dispositivoId: item.dispositivo.id, edificioId: item.edificio.id, nombre: item.edificio.nombre || item.dispositivo.nombre },
+  });
+  const parStockNoEncontrado = () => {
+    showToast({ type: 'warning', message: 'Ese edificio ya no está entre los tuyos. Se recargó la lista.' });
+    setPantalla(STOCK_INICIO);
   };
 
   // ---- M2 · Llegada de familias ----
@@ -494,6 +516,7 @@ export default function EmergenciaApp({ onCambiarModulo }) {
   const titulo = pestana === 'cuenta' ? 'Cuenta' : vista === 'inicio' ? `Hola, ${displayName}`
     : (['kits_entregas', 'llegadas_buscar'].includes(vista) && pantalla.dispositivo?.nombre)
       || (['plazas_mapa', 'plazas_estadias'].includes(vista) && pantalla.edificio?.nombre)
+      || (vista === 'stock_saldo' && pantalla.par?.nombre)
       || (vista === 'plazas_accion' && (TITULOS_ACCION_PLAZAS[pantalla.accion?.tipo]
         || (pantalla.accion?.plaza?.codigo ? `Cama ${pantalla.accion.plaza.codigo}` : null)))
       || (vista === 'llegadas_ficha' && pantalla.persona?.n != null && `Persona ${pantalla.persona.n}`)
@@ -509,6 +532,8 @@ export default function EmergenciaApp({ onCambiarModulo }) {
     else if (vista === 'llegadas_ficha' || vista === 'llegadas_cierre') setPantalla((actual) => ({ ...actual, vista: 'llegadas_integrantes', n: (actual.n || 0) + 1 }));
     else if (['llegadas_derivacion', 'llegadas_integrantes', 'llegadas_puerta'].includes(vista)) verBuscar({ dni: pantalla.dni || '' });
     else if (vista === 'llegadas_buscar' && !pantalla.unico) verDispositivosLlegadas();
+    else if (vista === 'stock_saldo') setPantalla(STOCK_INICIO);
+    else if (vista === 'stock_edificios') { setPestana('inicio'); setPantalla(INICIO); }
     else if (vista === 'plazas_accion') volverDeAccionPlazas();
     else if (vista === 'plazas_estadias') verMapaPlazas();
     else if (vista === 'plazas_mapa' && !pantalla.unico) verEdificiosPlazas({ sinEntrarDirecto: true });
@@ -547,13 +572,17 @@ export default function EmergenciaApp({ onCambiarModulo }) {
   };
   // Tocar una pestaña: a Inicio se llega siempre al inicio del módulo (con la guarda de arriba).
   const irAPestana = (destino) => {
-    if (destino === pestana && (destino === 'cuenta' || vista === 'inicio')) return;
+    if (destino === pestana && (destino === 'cuenta' || vista === (destino === 'stock' ? 'stock_edificios' : 'inicio'))) return;
     conGuarda(() => {
-      setPantalla(INICIO);
+      setPantalla(destino === 'stock' ? STOCK_INICIO : INICIO);
       setPestana(destino);
       refrescarEstado();
     });
   };
+  // Si el perfil deja de habilitar el stock estando en esa pestaña, se vuelve al inicio.
+  useEffect(() => {
+    if (pestana === 'stock' && perfil && perfil.stock !== true) { setPestana('inicio'); setPantalla(INICIO); }
+  }, [perfil, pestana]);
   useBotonAtras({ activo: vista !== 'inicio' || pestana !== 'inicio', alAtras: volver });
   let syncStatus = 'synced';
   if (sincronizando || cargandoPerfil) syncStatus = 'syncing';
@@ -566,7 +595,15 @@ export default function EmergenciaApp({ onCambiarModulo }) {
       <View style={{ flex: 1, backgroundColor: theme.colors.background }}>
         {pestana === 'cuenta' ? <CuentaScreen onCambiarModulo={onCambiarModulo || undefined} onLogout={salir} /> : null}
         {pestana === 'inicio' && vista === 'inicio' ? (
-          <EmergenciaInicioScreen onAbrir={abrir} recarga={recarga} onCargando={setCargandoPerfil} />
+          <EmergenciaInicioScreen onAbrir={abrir} recarga={recarga} onCargando={setCargandoPerfil} onPerfil={setPerfil} />
+        ) : null}
+        {pestana === 'stock' && vista === 'stock_edificios' ? (
+          <StockEdificiosScreen recarga={recarga} onElegir={elegirParStock} onSinModulo={sinModulo} />
+        ) : null}
+        {pestana === 'stock' && vista === 'stock_saldo' ? (
+          <StockSaldoScreen key={`stock-${pantalla.par?.dispositivoId}-${pantalla.par?.edificioId}`}
+            dispositivoId={pantalla.par?.dispositivoId} edificioId={pantalla.par?.edificioId} recarga={recarga}
+            onNoEncontrado={parStockNoEncontrado} onSinModulo={sinModulo} />
         ) : null}
         {pestana === 'inicio' && vista === 'envios' ? (
           <EmergenciaMisEnviosScreen syncTick={syncTick} enviadosTick={enviadosTick} onCambio={refrescarEstado}
@@ -663,7 +700,7 @@ export default function EmergenciaApp({ onCambiarModulo }) {
           );
         })() : null}
       </View>
-      <BottomNav items={PESTANAS} activeTab={pestana} onTabPress={irAPestana} />
+      <BottomNav items={pestanasDelPerfil(perfil)} activeTab={pestana} onTabPress={irAPestana} />
     </>
   );
 }

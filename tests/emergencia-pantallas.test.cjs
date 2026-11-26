@@ -226,6 +226,8 @@ test('m2: EmergenciaApp pasa «syncing» al Banner mientras carga el perfil', as
     '../screens/PlazasEgresoScreen': {__esModule: true, default: () => null},
     '../screens/PlazasCambioCamaScreen': {__esModule: true, default: () => null},
     '../screens/PlazaAccionSheet': {__esModule: true, default: () => null},
+    '../screens/StockEdificiosScreen': {__esModule: true, default: () => null},
+    '../screens/StockSaldoScreen': {__esModule: true, default: () => null},
     '../services/plazasApi': {normalizarMapa: mapa => mapa},
     '../services/emergenciaLimpieza': {depurarBorradoresFicha: async () => {}},
     '@react-native-community/netinfo': {__esModule: true, default: {addEventListener: () => () => {}}},

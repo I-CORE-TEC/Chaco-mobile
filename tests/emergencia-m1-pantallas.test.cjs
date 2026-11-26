@@ -756,6 +756,8 @@ async function montarApp({pendientes = 0, resumen = null, enCurso = null, sync =
     '../screens/PlazasEgresoScreen': {__esModule: true, default: () => null},
     '../screens/PlazasCambioCamaScreen': {__esModule: true, default: () => null},
     '../screens/PlazaAccionSheet': {__esModule: true, default: () => null},
+    '../screens/StockEdificiosScreen': {__esModule: true, default: () => null},
+    '../screens/StockSaldoScreen': {__esModule: true, default: () => null},
     '../services/plazasApi': {normalizarMapa: mapa => mapa},
     '../services/emergenciaLimpieza': {depurarBorradoresFicha: async () => {}},
     '../services/emergenciaCola': {
