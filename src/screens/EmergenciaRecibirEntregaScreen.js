@@ -46,6 +46,7 @@ export default function EmergenciaRecibirEntregaScreen({ entrega, dispositivoId 
   const [cantidades, setCantidades] = useState({});
   const [observacion, setObservacion] = useState('');
   const [remito, setRemito] = useState(null);
+  const [edificioId, setEdificioId] = useState(null);
   const [procesandoFoto, setProcesandoFoto] = useState(false);
   const [enviando, setEnviando] = useState(false);
   const [verificando, setVerificando] = useState(false);
@@ -78,6 +79,7 @@ export default function EmergenciaRecibirEntregaScreen({ entrega, dispositivoId 
         setRecepcion(abierta);
         setCantidades(abierta.cantidades);
         setObservacion(abierta.observacion || '');
+        setEdificioId(abierta.edificio_id ?? null);
         if (abierta.recuperada && !abierta.incierto) showToast({ type: 'info', message: TEXTO_RECUPERADA });
         if (abierta.uuidEnUso) setFalla(clasificarErrorRecepcion({ status: 409, payload: { code: 'UUID_EN_USO' } }));
         // Una incierta recuperada se verifica sola contra §11: si la entrega sigue pendiente, se destraba.
@@ -103,10 +105,10 @@ export default function EmergenciaRecibirEntregaScreen({ entrega, dispositivoId 
   useEffect(() => {
     if (!recepcion || bloqueada) return undefined;
     const timer = setTimeout(() => {
-      guardarRecepcion(recepcion.owner, entrega.id, { cantidades, observacion }).catch(() => {});
+      guardarRecepcion(recepcion.owner, entrega.id, { cantidades, observacion, edificio_id: edificioId }).catch(() => {});
     }, AUTOGUARDADO_MS);
     return () => clearTimeout(timer);
-  }, [cantidades, observacion, recepcion]);
+  }, [cantidades, observacion, edificioId, recepcion]);
 
   const hayCambios = !!remito || observacion.trim() !== '' || diferenciasDe(entrega, cantidades).length > 0;
   useEffect(() => {
@@ -130,6 +132,12 @@ export default function EmergenciaRecibirEntregaScreen({ entrega, dispositivoId 
       delete lineas[item];
       return sinVacios({ ...prev, lineas: Object.keys(lineas).length ? lineas : null, cantidades: null });
     });
+  };
+
+  const elegirEdificio = (id) => {
+    if (bloqueada) return;
+    setEdificioId(id);
+    setErroresServidor((prev) => (prev.edificio ? sinVacios({ ...prev, edificio: null }) : prev));
   };
 
   // ---- Foto del remito ----
@@ -216,7 +224,7 @@ export default function EmergenciaRecibirEntregaScreen({ entrega, dispositivoId 
     avisarEnviando(true);
     setFalla(null);
     try {
-      const resultado = await enviarRecepcion({ entrega, recepcion, cantidades, remito, observacion });
+      const resultado = await enviarRecepcion({ entrega, recepcion, cantidades, remito, observacion, edificioId });
       soltar(remitoRef.current);
       remitoRef.current = null;
       if (montado.current) setRemito(null);
@@ -269,7 +277,7 @@ export default function EmergenciaRecibirEntregaScreen({ entrega, dispositivoId 
   const recibir = async () => {
     if (enviandoRef.current || !recepcion || uuidEnUso) return;
     setIntentado(true);
-    if (Object.keys(validarRecepcion({ entrega, cantidades, remito, incierto })).length) return;
+    if (Object.keys(validarRecepcion({ entrega, cantidades, remito, incierto, edificioId })).length) return;
     if (!await hayConexion()) {
       if (!montado.current) return;
       setSinRed(true);
@@ -354,7 +362,8 @@ export default function EmergenciaRecibirEntregaScreen({ entrega, dispositivoId 
     return <View style={styles.centro}><ActivityIndicator size="large" color={theme.colors.primary} accessibilityLabel="Abriendo la recepción" /></View>;
   }
 
-  const erroresCliente = intentado ? validarRecepcion({ entrega, cantidades, remito, incierto }) : {};
+  const erroresCliente = intentado ? validarRecepcion({ entrega, cantidades, remito, incierto, edificioId }) : {};
+  const erroresEdificio = [...(erroresCliente.edificio || []), ...(erroresServidor.edificio || [])];
   const errorDeLinea = (item) => [...(erroresCliente.lineas?.[item] || []), ...(erroresServidor.lineas?.[item] || [])];
   const erroresRemito = [...(erroresCliente.remito || []), ...(erroresServidor.remito || [])];
   const diferencias = diferenciasDe(entrega, cantidades);
@@ -399,6 +408,27 @@ export default function EmergenciaRecibirEntregaScreen({ entrega, dispositivoId 
       </View>
 
       {incierto ? aviso('info', TEXTO_INCIERTA, 'lock-closed-outline') : null}
+
+      {entrega.requiere_edificio ? (
+        <View style={tarjeta}>
+          <Text accessibilityRole="header" style={[styles.titulo, { color: theme.colors.text, fontFamily: typography.bold }]}>{incierto ? '¿En qué edificio?' : '¿En qué edificio? *'}</Text>
+          <Text style={ayuda}>Lo que llegue se suma al stock del edificio que elijas.</Text>
+          {entrega.edificios.map((edificio) => {
+            const elegido = String(edificioId) === String(edificio.id);
+            return (
+              <Pressable key={String(edificio.id)} accessibilityRole="radio" accessibilityLabel={edificio.nombre}
+                accessibilityState={{ selected: elegido, disabled: bloqueada }} disabled={bloqueada} onPress={() => elegirEdificio(edificio.id)}
+                style={[styles.opcionEdificio, { borderColor: elegido ? theme.colors.primary : theme.colors.border }]}>
+                <Ionicons name={elegido ? 'radio-button-on' : 'radio-button-off'} size={22}
+                  color={elegido ? theme.colors.primary : theme.colors.textSoft} accessible={false} importantForAccessibility="no" />
+                <Text style={[styles.flex, styles.texto, { color: theme.colors.text, fontFamily: elegido ? typography.bold : typography.medium }]}>{edificio.nombre}</Text>
+              </Pressable>
+            );
+          })}
+          {entrega.edificios.length === 0 ? aviso('warning', 'No hay un edificio activo vinculado para recibir esta entrega. Pedí que vinculen uno desde el backoffice.', 'alert-circle-outline') : null}
+          {mensajes(erroresEdificio, 'edificio')}
+        </View>
+      ) : null}
 
       <View style={tarjeta}>
         <Text accessibilityRole="header" style={[styles.titulo, { color: theme.colors.text, fontFamily: typography.bold }]}>¿Cuánto llegó?</Text>
@@ -492,6 +522,7 @@ const styles = StyleSheet.create({
   areaTexto: { minHeight: 96, textAlignVertical: 'top' },
   aviso: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: radii.lg, padding: 10 },
   insignia: { alignSelf: 'flex-start', borderWidth: 1, borderRadius: radii.full, paddingHorizontal: 10, paddingVertical: 3 },
+  opcionEdificio: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 48, borderWidth: 1, borderRadius: radii.lg, paddingHorizontal: 12 },
   foto: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderRadius: radii.lg, padding: 8 },
   miniatura: { width: 64, height: 64, borderRadius: radii.md },
 });

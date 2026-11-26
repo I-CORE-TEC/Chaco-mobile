@@ -56,7 +56,8 @@ test('entregas: normaliza §10, resume ítems y nombra estados', async () => {
   const {k, entrega} = await preparar();
   igual(entrega, {id: 31, numero: '2026-K-000031', estado: 'EN_CAMINO', despachada_en: '2026-11-12T10:00:00-03:00',
     observacion_mesa: 'Entregar a la directora.', lineas: [
-      {item: 12, nombre: 'Colchón', unidad: 'unidad', enviada: 10, recibida: null}, {item: 14, nombre: 'Kit alimentario', unidad: 'kit', enviada: 3, recibida: null}]});
+      {item: 12, nombre: 'Colchón', unidad: 'unidad', enviada: 10, recibida: null}, {item: 14, nombre: 'Kit alimentario', unidad: 'kit', enviada: 3, recibida: null}],
+    requiere_edificio: false, edificios: []});
   assert.equal(k.resumenDeItems(entrega), '10 × Colchón · 3 × Kit alimentario');
   assert.equal(k.resumenDeItems({lineas: []}), 'Sin ítems');
   const preparada = k.normalizarEntrega({id: 32, estado: 'PREPARADA', lineas: [{item: 1, enviada: '4'}, {nombre: 'sin item'}]});
@@ -599,4 +600,126 @@ test('con un intento incierto el reenvío sale SIN remito aunque haya foto', asy
   const calls = router(r, recibirOk);
   await enviar(k, entrega, recepcion);
   igual(campos(calls[0]).map(([n]) => n), ['uuid_cliente', 'cantidades[12]', 'cantidades[14]', 'observacion']);
+});
+
+// ---- Edificio de la recepción (§10 y §12, PR 7a) ----
+
+const EDIFICIOS = [{id: 3, nombre: 'Edificio Alfa'}, {id: 4, nombre: 'Edificio Beta'}];
+const CON_EDIFICIO = {...ENTREGA, requiere_edificio: true, edificios: EDIFICIOS};
+const SOLO_FALTA_EDIFICIO = (k) => ({edificio: [k.FALTA_EDIFICIO]});
+const nombresDe = (call) => campos(call).map(([n]) => n);
+
+test('entregas: normaliza requiere_edificio y los edificios de la entrega; sin la clave, no pide edificio', async () => {
+  const {k} = await preparar();
+  const entrega = k.normalizarEntrega(CON_EDIFICIO);
+  assert.equal(entrega.requiere_edificio, true);
+  igual(entrega.edificios, EDIFICIOS);
+  igual(k.normalizarEntrega({...CON_EDIFICIO, requiere_edificio: 'true', edificios: [{id: 5}, {nombre: 'sin id'}, null]}).edificios,
+    [{id: 5, nombre: 'Edificio 5'}]);
+  assert.equal(k.normalizarEntrega({...CON_EDIFICIO, requiere_edificio: 'true'}).requiere_edificio, false, 'solo un true de verdad');
+  const vieja = k.normalizarEntrega(ENTREGA);
+  assert.equal(vieja.requiere_edificio, false);
+  igual(vieja.edificios, []);
+  assert.equal(k.edificioDeRecepcion(entrega, '4'), 4, 'el id sale de la entrega');
+  assert.equal(k.edificioDeRecepcion(entrega, 99), null, 'uno que ya no es de la entrega no vale');
+  assert.equal(k.edificioDeRecepcion(vieja, 3), null, 'sin requiere_edificio no se manda');
+});
+
+test('validarRecepcion: con requiere_edificio no se confirma sin elegir uno; un reenvío incierto no lo vuelve a pedir', async () => {
+  const {k} = await preparar();
+  const entrega = k.normalizarEntrega(CON_EDIFICIO);
+  const base = {entrega, cantidades: {12: '10', 14: '3'}, remito: REMITO};
+  igual(k.validarRecepcion(base), SOLO_FALTA_EDIFICIO(k));
+  igual(k.validarRecepcion({...base, edificioId: 99}), SOLO_FALTA_EDIFICIO(k), 'uno que no es de la entrega');
+  igual(k.validarRecepcion({...base, edificioId: 4}), {});
+  igual(k.validarRecepcion({...base, edificioId: 4, entrega: k.normalizarEntrega(ENTREGA)}), {});
+  igual(k.validarRecepcion({...base, entrega: k.normalizarEntrega(ENTREGA)}), {}, 'sin requiere_edificio no hace falta');
+  igual(k.validarRecepcion({...base, remito: null, incierto: true}), {}, 'incierto: ni remito ni edificio');
+});
+
+test('enviarRecepcion: con requiere_edificio manda edificio_id (antes del remito) y sin elegir no sale nada', async () => {
+  const {r, k} = await preparar();
+  const entrega = k.normalizarEntrega(CON_EDIFICIO);
+  const recepcion = await k.abrirRecepcion(entrega, 7);
+  igual(recepcion.edificio_id, null);
+  const calls = router(r, async () => recibirOk());
+  await assert.rejects(enviar(k, entrega, recepcion),
+    (error) => error.code === 'VALIDACION_LOCAL' && error.clasificacion.errores.edificio[0] === k.FALTA_EDIFICIO);
+  assert.equal(calls.length, 0, 'sin edificio no se manda nada');
+  await enviar(k, entrega, recepcion, {edificioId: 4});
+  assert.equal(calls.length, 1);
+  igual(campos(calls[0]), [
+    ['uuid_cliente', recepcion.uuid_cliente], ['cantidades[12]', '8'], ['cantidades[14]', '0'], ['observacion', 'Faltan dos'],
+    ['edificio_id', '4'], ['remito', {uri: 'file:///cache/remito.jpg', name: 'remito.jpg', type: 'image/jpeg'}],
+  ]);
+});
+
+test('enviarRecepcion: sin requiere_edificio el cuerpo es el de siempre, aunque se pase un edificio', async () => {
+  const {r, k, entrega} = await preparar();
+  const recepcion = await k.abrirRecepcion(entrega, 7);
+  const calls = router(r, async () => recibirOk());
+  await enviar(k, entrega, recepcion, {edificioId: 3});
+  assert.deepEqual(nombresDe(calls[0]), ['uuid_cliente', 'cantidades[12]', 'cantidades[14]', 'observacion', 'remito']);
+});
+
+test('la recepción abierta guarda el edificio elegido y lo recupera al reabrir; uno que ya no es de la entrega se descarta', async () => {
+  const {r, k} = await preparar();
+  const entrega = k.normalizarEntrega(CON_EDIFICIO);
+  const primera = await k.abrirRecepcion(entrega, 7);
+  await k.guardarRecepcion(primera.owner, entrega.id, {cantidades: {12: '9', 14: '3'}, edificio_id: 3});
+  const k2 = r.reload('./emergenciaKits');
+  const segunda = await k2.abrirRecepcion(k2.normalizarEntrega(CON_EDIFICIO), 7);
+  assert.equal(segunda.edificio_id, 3);
+  assert.equal(segunda.recuperada, true);
+  const otraLista = k2.normalizarEntrega({...CON_EDIFICIO, edificios: [EDIFICIOS[1]]});
+  assert.equal((await k2.abrirRecepcion(otraLista, 7)).edificio_id, null, 'el 3 ya no está entre los edificios de la entrega');
+});
+
+test('la cola de recepciones guarda edificio_id y el reenvío incierto lo manda igual, sin volver a validarlo', async () => {
+  const {r, k} = await preparar();
+  const entrega = k.normalizarEntrega(CON_EDIFICIO);
+  const recepcion = await k.abrirRecepcion(entrega, 7);
+  router(r, async () => fallaDeRed());
+  await assert.rejects(enviar(k, entrega, recepcion, {edificioId: 4}), (error) => error.recepcion.incierto === true);
+  const guardada = JSON.parse(r.values.get('emergencia_kits_recepciones:7'))[String(entrega.id)];
+  assert.equal(guardada.edificio_id, 4);
+  assert.equal(guardada.incierto, true);
+  const calls = router(r, recibirOk);
+  await enviar(k, entrega, recepcion, {remito: null});
+  assert.deepEqual(nombresDe(calls[0]), ['uuid_cliente', 'cantidades[12]', 'cantidades[14]', 'observacion', 'edificio_id'], 'sin foto, con el edificio guardado');
+  assert.equal(campos(calls[0]).find(([n]) => n === 'edificio_id')[1], '4');
+});
+
+test('un item viejo de la cola, sin edificio_id, se sigue mandando como antes', async () => {
+  const {r, k, entrega} = await preparar();
+  r.values.set('emergencia_kits_recepciones:7', JSON.stringify({31: {uuid_cliente: '11111111-1111-4111-8111-111111111111',
+    dispositivo: 7, numero: '2026-K-000031', cantidades: {12: '8', 14: '0'}, observacion: 'Llovía', incierto: true}}));
+  const recepcion = await k.abrirRecepcion(entrega, 7);
+  assert.equal(recepcion.uuid_cliente, '11111111-1111-4111-8111-111111111111');
+  assert.equal(recepcion.edificio_id, null);
+  const calls = router(r, recibirOk);
+  await enviar(k, entrega, recepcion);
+  assert.deepEqual(nombresDe(calls[0]), ['uuid_cliente', 'cantidades[12]', 'cantidades[14]', 'observacion']);
+  assert.equal(uuidDe(calls[0]), '11111111-1111-4111-8111-111111111111');
+  // Y una guardada antes del edificio, sobre una entrega que ahora lo pide: sin elegir, se pide uno.
+  r.values.set('emergencia_kits_recepciones:7', JSON.stringify({31: {uuid_cliente: '22222222-2222-4222-8222-222222222222',
+    dispositivo: 7, numero: '2026-K-000031', cantidades: {12: '8', 14: '0'}, observacion: ''}}));
+  const conEdificio = k.normalizarEntrega(CON_EDIFICIO);
+  const vieja = await k.abrirRecepcion(conEdificio, 7);
+  assert.equal(vieja.edificio_id, null);
+  await assert.rejects(enviar(k, conEdificio, vieja), (error) => error.clasificacion.errores.edificio[0] === k.FALTA_EDIFICIO);
+});
+
+test('400 VALIDACION con edificio_id: el error va al selector y no a los generales', async () => {
+  const {k} = await preparar();
+  igual(k.erroresDeRecepcion({edificio_id: ['Elegí en qué edificio se recibe esta entrega.'], detail: 'x', non_field_errors: ['x'], code: 'VALIDACION'}),
+    {edificio: ['Elegí en qué edificio se recibe esta entrega.']});
+  const {r, k: k2} = await preparar();
+  const conEdificio = k2.normalizarEntrega(CON_EDIFICIO);
+  const recepcion = await k2.abrirRecepcion(conEdificio, 7);
+  router(r, async () => response(400, {edificio_id: ['No es un edificio de la institución.'], code: 'VALIDACION', detail: 'x'}));
+  const error = await enviar(k2, conEdificio, recepcion, {edificioId: 4}).catch((e) => e);
+  assert.equal(error.clasificacion.tipo, 'validacion');
+  igual(error.clasificacion.errores, {edificio: ['No es un edificio de la institución.']});
+  assert.equal(error.recepcion.incierto, false, 'el 400 no escribió nada');
 });
