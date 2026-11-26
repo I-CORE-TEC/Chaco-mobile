@@ -1,4 +1,4 @@
-﻿// Stock · escritura (§17.1 del contrato): clasificarError de cada code nuevo, armado de los cuatro cuerpos, `uuid_cliente`
+// Stock · escritura (§17.1 del contrato): clasificarError de cada code nuevo, armado de los cuatro cuerpos, `uuid_cliente`
 // conservado entre reintentos y regenerado solo con UUID_EN_USO, y las cuatro pantallas con el cliente real sobre un fetch
 // simulado (SALDO_INSUFICIENTE y SALDO_CAMBIO conservan lo cargado; los botones salen solo con `puede.*`).
 const {test} = require('node:test');
@@ -727,7 +727,8 @@ test('Incierto: 200 ya_existia con movimientos distintos a lo enviado → advert
     await ui2.confirmar('Entregar');
     await ui2.confirmar('Reintentar');
     assert.equal(ui2.eventos.listo.length, 1);
-    assert.match(ui2.toasts.at(-1).message, /ya estaba registrado/);
+    assert.equal(ui2.toasts.at(-1).message, otra.s.TEXTO_YA_EXISTIA);
+    assert.equal(otra.s.TEXTO_YA_EXISTIA, 'Esto ya estaba registrado: no se repitió.');
   } finally { await ui2.close(); }
 });
 
@@ -800,4 +801,115 @@ test('Incierto: un timeout real se clasifica con su propio texto (no el de sin c
   // Un rechazo definitivo del back (nada se asentó) levanta el congelado.
   assert.equal(sesion.resolver({tipo: 'saldo_insuficiente'}).tipo, 'saldo_insuficiente');
   assert.equal(sesion.incierto(), false);
+});
+
+// Cada pantalla: cómo se llena hasta el envío y qué campos tienen que quedar bloqueados tras un timeout.
+const PANTALLAS_ESCRITURA = [
+  {nombre: 'Entregar', pantalla: 'StockEntregaScreen', get: () => ({[RUTA_SALDO]: SALDO()}), boton: 'Entregar',
+    llenar: async (ui) => { await ui.escribir('DNI', '30111222'); await ui.escribir('Cantidad de Colchón (unidad)', '2'); },
+    campos: ['DNI', 'Cantidad de Colchón (unidad)', 'Observación (opcional)']},
+  {nombre: 'Ingresar', pantalla: 'StockIngresoScreen', get: () => ({[RUTA_SALDO]: SALDO()}), boton: 'Registrar ingreso',
+    llenar: async (ui) => {
+      await ui.escribir('Cantidad de Agua (bidón)', '30'); await ui.elegir('Origen: Otro'); await ui.escribir('Detalle del origen', 'Vecinos');
+    },
+    campos: ['Cantidad de Agua (bidón)', 'Detalle del origen', 'Comprobante (opcional)']},
+  {nombre: 'Traspasar', pantalla: 'StockTraspasoScreen', get: GET_TRASPASO, boton: 'Traspasar',
+    llenar: async (ui) => { await ui.elegir('Edificio de destino: Edificio Beta · Escuela 12'); await ui.escribir('Cantidad de Colchón (unidad)', '2'); },
+    campos: ['Cantidad de Colchón (unidad)', 'Observación (opcional)'], radios: ['Edificio de destino: Edificio Gama · Escuela 30']},
+  {nombre: 'Ajustar', pantalla: 'StockAjusteScreen', get: () => ({[RUTA_SALDO]: SALDO()}), boton: 'Ajustar saldo',
+    llenar: async (ui) => {
+      await ui.elegir('Insumo: Colchón · 18 unidad'); await ui.escribir('Cantidad contada', '10');
+      await ui.elegir('Motivo: Otro'); await ui.escribir('Detalle', 'Se mojaron');
+    },
+    campos: ['Cantidad contada', 'Detalle'], radios: ['Insumo: Colchón · 18 unidad', 'Motivo: Otro']},
+];
+
+for (const p of PANTALLAS_ESCRITURA) {
+  test(`${p.nombre}: tras un timeout los campos quedan deshabilitados y el reintento sale con el mismo cuerpo`, async () => {
+    const base = await preparar();
+    const enviados = servidor(base.r, {get: p.get(), posts: [timeout, response(201, OPERACION())]});
+    const ui = await montar(p.pantalla, {}, base);
+    try {
+      await p.llenar(ui);
+      for (const etiqueta of p.campos) assert.equal(estaCongelado(ui, etiqueta), false, `${etiqueta}: editable antes de enviar`);
+      await ui.confirmar(p.boton);
+      assert.equal(enviados.length, 1);
+      assert.ok(ui.hay('pudo haber llegado'));
+      for (const etiqueta of p.campos) assert.equal(estaCongelado(ui, etiqueta), true, `${etiqueta}: congelado tras el timeout`);
+      for (const etiqueta of p.radios || []) assert.equal(ui.radio(etiqueta).props.disabled, true, `${etiqueta}: congelado tras el timeout`);
+      await ui.confirmar('Reintentar');
+      assert.equal(enviados.length, 2);
+      igual(enviados[1].cuerpo, enviados[0].cuerpo);
+    } finally { await ui.close(); }
+  });
+}
+
+test('Entregar: si quedó un nombre suelto y la persona aparece en el Registro, la entrega no se traba', async () => {
+  const {s} = await preparar();
+  const ok = {dni: '30111222', cantidades: {12: '1'}, insumos: [{item_id: 12}]};
+  assert.equal(s.hayErrores(s.validarEntrega({...ok, pideSexo: false, pideNombre: false, nombre: 'Juan', apellido: ''})), false, 'persona encontrada: el nombre suelto no cuenta');
+  assert.ok(s.validarEntrega({...ok, pideSexo: true, nombre: 'Juan'}).apellido, 'sin encontrarla, el nombre a medias sigue pidiendo el apellido');
+
+  const base = await preparar();
+  let persona = null;
+  const enviados = [];
+  base.r.setFetch(async (url, opciones) => {
+    const ruta = String(url).replace('https://example.test', '');
+    if (ruta.startsWith(RUTA_SALDO + 'persona/')) return response(200, {persona, historial: []});
+    if (opciones?.method === 'POST') { enviados.push(JSON.parse(opciones.body)); return response(201, OPERACION()); }
+    return response(200, SALDO());
+  });
+  const ui = await montar('StockEntregaScreen', {}, base);
+  try {
+    await ui.escribir('DNI', '30111222');
+    await ui.escribir('Cantidad de Colchón (unidad)', '2');
+    await ui.tocar('Buscar persona');
+    await ui.escribir('Nombre (si no sabés el sexo)', 'Juan');
+    await ui.elegir('Sexo: Masculino');
+    persona = {dni: '30111222', nombre: 'Juan', apellido: 'Paz'};
+    await ui.tocar('Buscar persona');
+    assert.ok(ui.hay('Juan Paz'), 'la persona apareció y los campos de nombre se ocultaron');
+    assert.equal(ui.campo('Apellido (si no sabés el sexo)'), undefined);
+    await ui.confirmar('Entregar');
+    assert.equal(enviados.length, 1, 'la entrega sale');
+    assert.equal(ui.eventos.listo.length, 1);
+    assert.equal('nombre' in enviados[0], false, 'no manda el nombre suelto: la persona ya existe');
+  } finally { await ui.close(); }
+});
+
+test('Sin conexión al reintentar tras un incierto: el texto sigue diciendo que el envío anterior pudo haber llegado', async () => {
+  const base = await preparar();
+  const enviados = servidor(base.r, {get: {[RUTA_SALDO]: SALDO()}, posts: [timeout, response(201, OPERACION())]});
+  const ui = await montar('StockEntregaScreen', {}, base);
+  try {
+    await ui.escribir('DNI', '30111222');
+    await ui.escribir('Cantidad de Colchón (unidad)', '2');
+    await ui.confirmar('Entregar');
+    base.r.setOnline(false);
+    await ui.confirmar('Reintentar');
+    assert.equal(enviados.length, 1, 'sin red no sale nada');
+    assert.ok(ui.hay('Necesitás conexión para reintentar') && ui.hay('pudo haber llegado'));
+    assert.equal(ui.hay('No se envió nada'), false, 'no contradice el aviso anterior');
+    assert.equal(estaCongelado(ui, 'DNI'), true, 'sigue congelado');
+    base.r.setOnline(true);
+    await ui.confirmar('Reintentar');
+    assert.equal(enviados.length, 2);
+    igual(enviados[1].cuerpo, enviados[0].cuerpo);
+  } finally { await ui.close(); }
+});
+
+// Un archivo guardado con la codificación equivocada (BOM o UTF-8 leído como cp1252, que deja una A con tilde delante de cada acento) pasa la suite pero rompe los textos.
+test('Codificación: ningún .js de src ni de tests tiene BOM ni acentos en doble codificación', () => {
+  const malos = [];
+  const recorrer = (dir) => fs.readdirSync(dir, {withFileTypes: true}).forEach((e) => {
+    const ruta = path.join(dir, e.name);
+    if (e.isDirectory()) return recorrer(ruta);
+    if (!/\.(js|cjs|jsx)$/.test(e.name)) return;
+    const bytes = fs.readFileSync(ruta);
+    const texto = bytes.toString('utf8');
+    if ((bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) || texto.includes(String.fromCharCode(0xc3))) malos.push(path.relative(path.join(__dirname, '..'), ruta));
+  });
+  recorrer(src);
+  recorrer(__dirname);
+  assert.deepEqual(malos, []);
 });

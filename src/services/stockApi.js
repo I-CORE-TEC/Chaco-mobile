@@ -43,6 +43,10 @@ export const TEXTO_UUID_EN_USO_INCIERTO = 'El servidor dice que este envío ya e
 export const TEXTO_YA_EXISTIA_DISTINTO = 'Ya había un envío registrado con datos distintos a los de ahora, y no se repitió. Revisá los movimientos del edificio antes de cargar de nuevo.';
 // Sin conexión ANTES de enviar: no salió nada, lo cargado se puede editar.
 export const TEXTO_SIN_RED_ESCRITURA = 'Necesitás conexión para mandar esto. No se envió nada y lo cargado se conserva: reintentá cuando tengas señal.';
+// Sin conexión al REINTENTAR tras un incierto: el envío anterior sigue en duda.
+export const TEXTO_SIN_RED_REINTENTO = 'Necesitás conexión para reintentar. El envío anterior pudo haber llegado: reintentá con los mismos datos cuando tengas señal (si ya había llegado, no se repite) o salí y revisá los movimientos del edificio.';
+// 200 `ya_existia` con los mismos datos: el primer envío sí había llegado.
+export const TEXTO_YA_EXISTIA = 'Esto ya estaba registrado: no se repitió.';
 // Resultado INCIERTO (timeout, corte con el pedido en camino, 5xx): pudo haber llegado. El formulario queda congelado.
 const REVISAR = 'El envío pudo haber llegado. Los datos quedan bloqueados: reintentá con los mismos datos (si ya había llegado, no se repite) o salí y revisá los movimientos del edificio antes de cargar de nuevo.';
 export const TEXTO_TIMEOUT_ESCRITURA = `El servidor tardó demasiado en responder. ${REVISAR}`;
@@ -397,7 +401,9 @@ export const coincideConLoEnviado = (operacion, esperado) => {
 // enviar (hayRed) no se manda nada. Un `network` sin timeout con red al empezar es un corte con el pedido en camino.
 export const enviarOperacion = async (sesion, llamar, esperado = null) => {
   if (!(await hayRed())) {
-    return { ok: false, clasificacion: sesion.resolver(clasificarErrorEscritura({ network: true })), sinEnviar: true };
+    const sinRed = clasificarErrorEscritura({ network: true });
+    const clasificacion = sesion.incierto() ? { ...sinRed, mensaje: TEXTO_SIN_RED_REINTENTO } : sinRed;
+    return { ok: false, clasificacion: sesion.resolver(clasificacion), sinEnviar: true };
   }
   try {
     const operacion = await llamar(sesion.uuid());
@@ -440,7 +446,8 @@ export const validarEntrega = ({ dni, cantidades, insumos, pideSexo, sexo, pideN
   if (!dniValido(dni)) errores.dni = 'Ingresá el DNI de la persona (solo números).';
   // Alta mínima (§17.1): con nombre y apellido no hace falta el sexo.
   const conNombre = lleno(nombre) && lleno(apellido);
-  const pedirNombre = pideNombre || lleno(nombre) || lleno(apellido);
+  // Un nombre suelto solo cuenta mientras la persona sigue sin encontrarse (pideSexo): si apareció, los campos se ocultan.
+  const pedirNombre = pideNombre || (pideSexo && (lleno(nombre) || lleno(apellido)));
   if (pideSexo && !lleno(sexo) && !conNombre) errores.sexo = 'Elegí el sexo que figura en el DNI, o cargá nombre y apellido.';
   if (pedirNombre && !lleno(nombre)) errores.nombre = 'Ingresá el nombre.';
   if (pedirNombre && !lleno(apellido)) errores.apellido = 'Ingresá el apellido.';
