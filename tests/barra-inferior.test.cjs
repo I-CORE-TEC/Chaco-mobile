@@ -104,14 +104,17 @@ test('teclado web: abierto solo con el viewport achicado y un campo enfocado', (
 // Las entradas de cada módulo: se leen de la fuente para que agregar o quitar una sea una decisión visible.
 const entradasDe = (archivo) => {
   const fuente = fs.readFileSync(path.join(root, archivo), 'utf8');
-  const bloque = fuente.match(/const PESTANAS = \[([\s\S]*?)\n\];/)[1];
+  // Emergencia declara una constante por entrada (la de «Stock» solo se suma con perfil.stock).
+  const bloque = archivo.endsWith('EmergenciaApp.js')
+    ? [...fuente.matchAll(/const PESTANA_\w+ = (\{[^\n]*\});/g)].map(m => m[1]).join('\n')
+    : fuente.match(/const PESTANAS = \[([\s\S]*?)\n\];/)[1];
   return [...bloque.matchAll(/id: '([^']+)', label: '([^']+)'/g)].map(m => m[1] + ':' + m[2]);
 };
 
 test('cada módulo declara sus entradas: ninguno usa ya el panel lateral ni un botón «Menú»', () => {
   assert.deepEqual(entradasDe('src/navigation/BecasApp.js'), ['Inicio:Inicio', 'Relevamientos:Relevamientos', 'Cuenta:Cuenta']);
   assert.deepEqual(entradasDe('src/navigation/DispositivosApp.js'), ['inicio:Inicio', 'cuenta:Cuenta']);
-  assert.deepEqual(entradasDe('src/navigation/EmergenciaApp.js'), ['inicio:Inicio', 'cuenta:Cuenta']);
+  assert.deepEqual(entradasDe('src/navigation/EmergenciaApp.js'), ['inicio:Inicio', 'stock:Stock', 'cuenta:Cuenta']);
   for (const archivo of ['BecasApp', 'DispositivosApp', 'EmergenciaApp']) {
     const fuente = fs.readFileSync(path.join(root, 'src/navigation', archivo + '.js'), 'utf8');
     assert.ok(!/SettingsPanel/.test(fuente), archivo + ' no debe usar el panel lateral');

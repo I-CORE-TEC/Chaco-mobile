@@ -15,7 +15,10 @@ export const AVISO_DESACTUALIZADO = 'No se pudo actualizar: se muestran tus acce
 // guardado (si hay) y lo actualiza con el del back. `recarga` cambia cuando se pide volver a
 // consultarlo (botón de sincronizar del Banner); `onCargando` avisa cuándo hay un pedido en curso,
 // para que el Banner lo muestre (RN Web no dibuja el RefreshControl).
-export default function EmergenciaInicioScreen({ onAbrir, recarga = 0, onCargando }) {
+export const SOLO_STOCK = 'Tenés acceso a Stock desde la barra de abajo.';
+
+// `onPerfil(perfil)`: el perfil vigente (guardado o del back), para que el módulo arme la barra inferior.
+export default function EmergenciaInicioScreen({ onAbrir, recarga = 0, onCargando, onPerfil }) {
   const { theme, typography } = useTheme();
   const [perfil, setPerfil] = useState(null);
   const [desdeCache, setDesdeCache] = useState(false);
@@ -74,6 +77,7 @@ export default function EmergenciaInicioScreen({ onAbrir, recarga = 0, onCargand
   }, [cargar]);
 
   useEffect(() => { if (recarga) cargar({ silencioso: true }); }, [recarga, cargar]);
+  useEffect(() => { if (perfil && onPerfil) onPerfil(perfil); }, [perfil]);
 
   const accesos = accesosDelPerfil(perfil);
 
@@ -119,7 +123,7 @@ export default function EmergenciaInicioScreen({ onAbrir, recarga = 0, onCargand
       {perfil && !accesos.length ? (
         <View style={styles.centro}>
           <Ionicons name="file-tray-outline" size={30} color={theme.colors.textSoft} accessible={false} importantForAccessibility="no" />
-          <Text style={[styles.vacio, { color: theme.colors.textSoft, fontFamily: typography.medium }]}>{SIN_TAREAS}</Text>
+          <Text style={[styles.vacio, { color: theme.colors.textSoft, fontFamily: typography.medium }]}>{perfil.stock ? SOLO_STOCK : SIN_TAREAS}</Text>
         </View>
       ) : null}
 

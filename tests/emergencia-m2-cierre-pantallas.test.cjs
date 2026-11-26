@@ -884,6 +884,8 @@ async function montarApp() {
     '../screens/PlazasEgresoScreen': {__esModule: true, default: () => null},
     '../screens/PlazasCambioCamaScreen': {__esModule: true, default: () => null},
     '../screens/PlazaAccionSheet': {__esModule: true, default: () => null},
+    '../screens/StockEdificiosScreen': {__esModule: true, default: () => null},
+    '../screens/StockSaldoScreen': {__esModule: true, default: () => null},
     '../services/plazasApi': {normalizarMapa: mapa => mapa},
     '@react-native-community/netinfo': {__esModule: true, default: {addEventListener: () => () => {}}},
     '../services/emergenciaLimpieza': {depurarBorradoresFicha: async () => {}},
