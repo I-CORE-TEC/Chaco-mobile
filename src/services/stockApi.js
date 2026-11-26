@@ -1,9 +1,11 @@
 // «Stock» (lectura): pares institución · edificio del usuario, saldo por insumo y libro de movimientos.
 // El contrato es la §17 de docs/internal/contrato-app-emergencia.md de Chaco-Back; los nombres de
-// campos son los de ahí. Solo con conexión: no hay cola ni caché. Sin escrituras (son de otro PR).
+// campos son los de ahí (§17 lectura y §17.1 escritura). Solo con conexión: no hay cola ni caché; las cuatro
+// escrituras (entregar, ingresar, traspasar, ajustar) son idempotentes por `uuid_cliente` y no se encolan.
 //
 // Como el resto de Emergencia, un 403 SIN_MODULO pasa por verificarSinModulo (el mismo código
 // significa también «falta un permiso parcial»): el resultado queda en `error.verificacionSinModulo`.
+import * as Crypto from 'expo-crypto';
 import { becasRequest } from './becasApi';
 import { verificarSinModulo } from './emergenciaPerfil';
 import { esSinModulo } from './sinModulo';
@@ -15,6 +17,12 @@ export const RUTAS = {
   lista: `${BASE}stock/`,
   saldo: (dispositivoId, edificioId) => base(dispositivoId, edificioId),
   movimientos: (dispositivoId, edificioId) => `${base(dispositivoId, edificioId)}movimientos/`,
+  destinos: (dispositivoId, edificioId) => `${base(dispositivoId, edificioId)}destinos-traspaso/`,
+  persona: (dispositivoId, edificioId) => `${base(dispositivoId, edificioId)}persona/`,
+  entregas: (dispositivoId, edificioId) => `${base(dispositivoId, edificioId)}entregas/`,
+  ingresos: (dispositivoId, edificioId) => `${base(dispositivoId, edificioId)}ingresos/`,
+  traspasos: (dispositivoId, edificioId) => `${base(dispositivoId, edificioId)}traspasos/`,
+  ajustes: (dispositivoId, edificioId) => `${base(dispositivoId, edificioId)}ajustes/`,
 };
 
 export const TEXTO_SIN_RED = 'Necesitás conexión para ver el stock.';
@@ -25,6 +33,35 @@ export const TEXTO_SIN_MODULO = 'Tu usuario no ve el stock de ningún edificio. 
 export const TEXTO_SIN_PERMISO = 'No tenés permiso para esta consulta de stock.';
 export const TEXTO_VALIDACION = 'El filtro de movimientos no es válido. Volvé a la lista completa.';
 export const TEXTO_ESPERAR = 'Hay demasiadas consultas seguidas. Esperá un momento y volvé a probar.';
+export const TEXTO_SALDO_INSUFICIENTE = 'No alcanza el stock de algún insumo. Mirá los saldos de ahora y corregí las cantidades.';
+export const TEXTO_SALDO_CAMBIO = 'El saldo cambió mientras contabas. Volvé a contar.';
+export const TEXTO_UUID_EN_USO = 'Ese envío ya era de otra operación. Se generó uno nuevo: revisá lo cargado y volvé a tocar el botón.';
+export const TEXTO_NO_HABILITADO = 'Este edificio o su institución no está habilitado para mover stock ahora (la institución no está activa, el edificio está inactivo o el destino no lleva stock). No se movió nada. Consultalo con quien administra el stock.';
+export const TEXTO_PERSONA_SIN_DATOS = 'No se encontró a la persona. Completá los datos que faltan para entregarle.';
+export const TEXTO_SIN_RED_ESCRITURA = 'Necesitás conexión para mandar esto. Lo cargado se conserva: reintentá cuando tengas señal.';
+export const TEXTO_REINTENTAR_ESCRITURA = 'No se pudo confirmar el envío. Reintentá: si ya había llegado, no se repite.';
+export const TEXTO_SIN_PERMISO_ESCRITURA = 'No tenés permiso para esta acción en este edificio.';
+
+const lista = (valor) => (Array.isArray(valor) ? valor : []);
+const texto = (valor) => (typeof valor === 'string' ? valor : '');
+const numero = (valor) => (Number.isFinite(Number(valor)) ? Number(valor) : 0);
+
+// `{item_id, nombre, unidad, cantidad, alcanza}`: los saldos de TODAS las líneas que salen (409 SALDO_INSUFICIENTE).
+const normalizarSaldosRechazo = (saldos) => lista(saldos).filter((saldo) => saldo?.item_id != null).map((saldo) => ({
+  item_id: saldo.item_id, nombre: texto(saldo.nombre), unidad: texto(saldo.unidad), cantidad: numero(saldo.cantidad), alcanza: saldo.alcanza !== false,
+}));
+
+// 400 VALIDACION: `{ campo: [mensajes] }` con lo que trae el back (`detail` y `code` quedan aparte).
+const erroresPorCampo = (payload) => {
+  const datos = payload && typeof payload === 'object' ? payload : {};
+  const salida = {};
+  Object.keys(datos).forEach((campo) => {
+    if (campo === 'detail' || campo === 'code') return;
+    const mensajes = (Array.isArray(datos[campo]) ? datos[campo] : [datos[campo]]).filter((m) => typeof m === 'string' && m.trim());
+    if (mensajes.length) salida[campo] = mensajes;
+  });
+  return salida;
+};
 
 const conVerificacion = async (pedido) => {
   try {
@@ -43,6 +80,9 @@ const detalleDe = (error) => (typeof error?.payload?.detail === 'string' && erro
 // - sin_permiso: 403 SIN_PERMISO (ve el edificio pero no tiene esa capacidad).
 // - no_encontrado: 404 (edificio inexistente, ajeno, fuera de alcance o institución sin stock: el mismo cuerpo).
 // - validacion: 400 VALIDACION (tipo, item o cursor inválidos).   - espera: 429 con `espera` en ms si vino Retry-After.
+// - Escritura (§17.1): saldo_insuficiente (409 con `saldos`), saldo_cambio (409 con `saldoActual`), uuid_en_uso (409),
+//   no_habilitado (409 STOCK_NO_HABILITADO), persona_sin_datos (400 con `pideSexo` y `motivo`); un 400 VALIDACION
+//   trae además `errores` por campo.
 // - otro: HTML, 5xx y lo demás, con texto fijo (nunca `error.message` crudo).
 export const clasificarError = (error) => {
   const status = Number(error?.status);
@@ -55,7 +95,21 @@ export const clasificarError = (error) => {
     return { tipo: 'sin_permiso', mensaje: code === 'SIN_PERMISO' ? (detalleDe(error) || TEXTO_SIN_PERMISO) : TEXTO_SIN_PERMISO };
   }
   if (status === 404 && !html) return { tipo: 'no_encontrado', mensaje: TEXTO_NO_ENCONTRADO };
-  if (status === 400 && !html && code === 'VALIDACION') return { tipo: 'validacion', mensaje: detalleDe(error) || TEXTO_VALIDACION };
+  if (status === 400 && !html && code === 'VALIDACION') {
+    return { tipo: 'validacion', mensaje: detalleDe(error) || TEXTO_VALIDACION, errores: erroresPorCampo(error?.payload) };
+  }
+  if (status === 400 && !html && code === 'PERSONA_SIN_DATOS') {
+    return { tipo: 'persona_sin_datos', mensaje: detalleDe(error) || TEXTO_PERSONA_SIN_DATOS, pideSexo: error.payload.pide_sexo === true, motivo: texto(error.payload.motivo) };
+  }
+  if (status === 409 && !html && code === 'SALDO_INSUFICIENTE') {
+    return { tipo: 'saldo_insuficiente', mensaje: detalleDe(error) || TEXTO_SALDO_INSUFICIENTE, saldos: normalizarSaldosRechazo(error.payload.saldos) };
+  }
+  if (status === 409 && !html && code === 'SALDO_CAMBIO') {
+    const actual = error.payload.saldo_actual;
+    return { tipo: 'saldo_cambio', mensaje: detalleDe(error) || TEXTO_SALDO_CAMBIO, saldoActual: actual == null ? null : numero(actual) };
+  }
+  if (status === 409 && !html && code === 'UUID_EN_USO') return { tipo: 'uuid_en_uso', mensaje: TEXTO_UUID_EN_USO };
+  if (status === 409 && !html && code === 'STOCK_NO_HABILITADO') return { tipo: 'no_habilitado', mensaje: TEXTO_NO_HABILITADO };
   if (status === 429 && !html) {
     const espera = Number(error?.retryAfter) > 0 ? Number(error.retryAfter) : null;
     return { tipo: 'espera', mensaje: TEXTO_ESPERAR, espera };
@@ -64,9 +118,6 @@ export const clasificarError = (error) => {
 };
 
 // ---- Normalización ----
-const lista = (valor) => (Array.isArray(valor) ? valor : []);
-const texto = (valor) => (typeof valor === 'string' ? valor : '');
-const numero = (valor) => (Number.isFinite(Number(valor)) ? Number(valor) : 0);
 const unidad = (par) => ({ id: par?.id, nombre: texto(par?.nombre) });
 
 // `puede`: lo que la app muestra como botón solo viene en true (las escrituras son de otro PR).
@@ -174,3 +225,183 @@ export const getSaldo = (dispositivoId, edificioId) => conVerificacion(async () 
   await becasRequest(RUTAS.saldo(dispositivoId, edificioId))));
 export const getMovimientos = (dispositivoId, edificioId, filtros = {}) => conVerificacion(async () => normalizarMovimientos(
   await becasRequest(`${RUTAS.movimientos(dispositivoId, edificioId)}${armarQueryMovimientos(filtros)}`)));
+
+// ---- Escritura (§17.1) ----
+export const ORIGENES_INGRESO = [
+  { id: 'DONACION', texto: 'Donación' }, { id: 'MUNICIPIO', texto: 'Municipio' }, { id: 'COMPRA', texto: 'Compra' },
+  { id: 'OTRO_PROGRAMA', texto: 'Otro programa' }, { id: 'OTRO', texto: 'Otro' },
+];
+export const MOTIVOS_AJUSTE = [
+  { id: 'INVENTARIO_INICIAL', texto: 'Inventario inicial' }, { id: 'CONTEO_PERIODICO', texto: 'Conteo periódico' },
+  { id: 'ROTURA_VENCIMIENTO', texto: 'Rotura o vencimiento' }, { id: 'PERDIDA_ROBO', texto: 'Pérdida o robo' },
+  { id: 'CORRECCION_CARGA', texto: 'Corrección de una carga' }, { id: 'OTRO', texto: 'Otro' },
+];
+export const SEXOS = [{ id: 'F', texto: 'Femenino' }, { id: 'M', texto: 'Masculino' }, { id: 'X', texto: 'X' }];
+// §17.1: con estos, el texto de acompañamiento es obligatorio.
+export const MOTIVOS_CON_DETALLE = ['OTRO', 'CORRECCION_CARGA'];
+export const ORIGEN_CON_DETALLE = 'OTRO';
+
+// El `uuid_cliente` nace al abrir el formulario (nuevoUuid) y se conserva en los reintentos.
+export const nuevoUuid = () => String(Crypto.randomUUID()).toLowerCase();
+
+const lleno = (valor) => typeof valor === 'string' && valor.trim() !== '';
+const conTexto = (cuerpo, campo, valor) => (lleno(valor) ? { ...cuerpo, [campo]: valor.trim() } : cuerpo);
+const soloDigitos = (valor) => String(valor ?? '').replace(/\D/g, '');
+
+// `cantidades` = { [item_id]: texto } y `insumos` = [{ item_id }] → [{ item_id, cantidad }] solo con enteros > 0.
+export const cantidadValida = (valor) => /^\d+$/.test(String(valor ?? '').trim()) && Number(String(valor).trim()) > 0;
+export const armarLineas = (cantidades = {}, insumos = []) => insumos
+  .filter((insumo) => cantidadValida(cantidades[insumo.item_id]))
+  .map((insumo) => ({ item_id: insumo.item_id, cantidad: Number(String(cantidades[insumo.item_id]).trim()) }));
+
+// Cada armado deja fuera lo vacío: el back no recibe campos en blanco.
+export const armarEntrega = ({ uuid_cliente, dni, lineas, sexo, nombre, apellido, observacion }) => {
+  let cuerpo = { uuid_cliente, dni: soloDigitos(dni), lineas };
+  cuerpo = conTexto(cuerpo, 'sexo', sexo);
+  cuerpo = conTexto(cuerpo, 'nombre', nombre);
+  cuerpo = conTexto(cuerpo, 'apellido', apellido);
+  return conTexto(cuerpo, 'observacion', observacion);
+};
+export const armarIngreso = ({ uuid_cliente, lineas, origen, origen_detalle, comprobante }) => {
+  const cuerpo = { uuid_cliente, lineas, origen };
+  return conTexto(conTexto(cuerpo, 'origen_detalle', origen === ORIGEN_CON_DETALLE ? origen_detalle : ''), 'comprobante', comprobante);
+};
+export const armarTraspaso = ({ uuid_cliente, destino_dispositivo_id, destino_edificio_id, lineas, observacion }) => conTexto(
+  { uuid_cliente, destino_dispositivo_id, destino_edificio_id, lineas }, 'observacion', observacion);
+export const armarAjuste = ({ uuid_cliente, item_id, cantidad_contada, saldo_visto, motivo, detalle }) => conTexto({
+  uuid_cliente, item_id, cantidad_contada: Number(String(cantidad_contada).trim()), saldo_visto: Number(saldo_visto), motivo,
+}, 'detalle', detalle);
+
+// GET persona/?dni=&sexo= → { persona: { dni, nombre, apellido } | null, historial: [{ creado_en, institucion, lineas }] }.
+export const normalizarPersona = (payload) => {
+  const datos = payload && typeof payload === 'object' ? payload : {};
+  const persona = datos.persona && typeof datos.persona === 'object'
+    ? { dni: texto(datos.persona.dni), nombre: texto(datos.persona.nombre), apellido: texto(datos.persona.apellido) } : null;
+  return {
+    persona,
+    historial: lista(datos.historial).map((entrega) => ({
+      creado_en: entrega?.creado_en || null,
+      institucion: texto(entrega?.institucion) || 'Otra institución',
+      lineas: lista(entrega?.lineas).map((linea) => ({ nombre: texto(linea?.nombre), unidad: texto(linea?.unidad), cantidad: numero(linea?.cantidad) })),
+    })),
+  };
+};
+export const armarQueryPersona = ({ dni, sexo = '' } = {}) => `?dni=${encodeURIComponent(soloDigitos(dni))}${lleno(sexo) ? `&sexo=${encodeURIComponent(sexo.trim())}` : ''}`;
+
+export const normalizarDestinos = (payload) => normalizarPares(payload).map(({ dispositivo, edificio }) => ({ dispositivo, edificio }));
+
+// 201 o 200 (`ya_existia`): { id, tipo, uuid_cliente, ya_existia, creado_en, movimientos }.
+export const normalizarOperacion = (payload) => {
+  const datos = payload && typeof payload === 'object' ? payload : {};
+  return {
+    id: datos.id ?? null,
+    tipo: texto(datos.tipo),
+    uuid_cliente: datos.uuid_cliente ?? null,
+    ya_existia: datos.ya_existia === true,
+    creado_en: datos.creado_en || null,
+    movimientos: lista(datos.movimientos).map((mov) => ({
+      item_id: mov?.item_id ?? null, nombre: texto(mov?.nombre), unidad: texto(mov?.unidad), cantidad: numero(mov?.cantidad),
+      saldo_posterior: mov?.saldo_posterior == null ? null : numero(mov.saldo_posterior),
+    })),
+  };
+};
+
+export const getDestinosTraspaso = (dispositivoId, edificioId) => conVerificacion(async () => normalizarDestinos(
+  await becasRequest(RUTAS.destinos(dispositivoId, edificioId))));
+export const getPersona = (dispositivoId, edificioId, consulta) => conVerificacion(async () => normalizarPersona(
+  await becasRequest(`${RUTAS.persona(dispositivoId, edificioId)}${armarQueryPersona(consulta)}`)));
+
+const enviar = (ruta) => (dispositivoId, edificioId, cuerpo) => conVerificacion(async () => normalizarOperacion(
+  await becasRequest(ruta(dispositivoId, edificioId), { method: 'POST', body: cuerpo })));
+export const postEntrega = enviar(RUTAS.entregas);
+export const postIngreso = enviar(RUTAS.ingresos);
+export const postTraspaso = enviar(RUTAS.traspasos);
+export const postAjuste = enviar(RUTAS.ajustes);
+
+// Como clasificarError, pero con los textos de quien MANDA algo: sin red y los errores sin code no dicen «ver».
+export const clasificarErrorEscritura = (error) => {
+  const clasificado = clasificarError(error);
+  if (clasificado.tipo === 'sin_red') return { ...clasificado, mensaje: TEXTO_SIN_RED_ESCRITURA };
+  if (clasificado.tipo === 'sin_permiso' && clasificado.mensaje === TEXTO_SIN_PERMISO) return { ...clasificado, mensaje: TEXTO_SIN_PERMISO_ESCRITURA };
+  if (clasificado.tipo === 'otro') return { ...clasificado, mensaje: TEXTO_REINTENTAR_ESCRITURA };
+  return clasificado;
+};
+
+// 429 con Retry-After (en ms, como el resto de la app): «Esperá 12 segundos…».
+export const textoEspera = (ms) => {
+  const segundos = Math.max(1, Math.ceil(Number(ms) / 1000));
+  return `Hay demasiados pedidos seguidos. Esperá ${segundos} ${segundos === 1 ? 'segundo' : 'segundos'} y volvé a probar. Lo cargado se conserva.`;
+};
+
+// Idempotencia (§17.1): UN uuid por formulario abierto. Un reintento (sin red, 5xx, saldo, validación…) usa el
+// mismo: si la primera vez llegó, el back contesta 200 `ya_existia` y no mueve el saldo. Solo UUID_EN_USO
+// (ese uuid es de otra operación y no escribió nada acá) genera uno nuevo.
+export const crearSesionEnvio = (generar = nuevoUuid) => {
+  let uuid = generar();
+  return {
+    uuid: () => uuid,
+    resolver: (clasificacion) => { if (clasificacion?.tipo === 'uuid_en_uso') uuid = generar(); },
+  };
+};
+
+// `llamar(uuid)` hace el POST. → { ok: true, operacion } o { ok: false, clasificacion }.
+export const enviarOperacion = async (sesion, llamar) => {
+  try {
+    return { ok: true, operacion: await llamar(sesion.uuid()) };
+  } catch (error) {
+    const clasificacion = clasificarErrorEscritura(error);
+    sesion.resolver(clasificacion);
+    return { ok: false, clasificacion, error };
+  }
+};
+
+// ---- Validación en el teléfono (el back vuelve a validar todo) ----
+export const TEXTO_SIN_LINEAS = 'Cargá la cantidad de al menos un insumo.';
+export const TEXTO_CANTIDAD_INVALIDA = 'La cantidad tiene que ser un número entero mayor que 0.';
+
+// → { lineas?: msg, cantidades: { [item_id]: msg } }. Cantidad en blanco = ese insumo no se manda.
+export const validarCantidades = (cantidades = {}, insumos = []) => {
+  const errores = { cantidades: {} };
+  let alguna = false;
+  insumos.forEach((insumo) => {
+    const valor = String(cantidades[insumo.item_id] ?? '').trim();
+    if (!valor || /^0+$/.test(valor)) return;
+    if (cantidadValida(valor)) alguna = true;
+    else errores.cantidades[insumo.item_id] = TEXTO_CANTIDAD_INVALIDA;
+  });
+  if (!alguna && !Object.keys(errores.cantidades).length) errores.lineas = TEXTO_SIN_LINEAS;
+  return errores;
+};
+export const hayErrores = (errores) => Object.keys(errores || {}).some((clave) => (clave === 'cantidades'
+  ? Object.keys(errores.cantidades || {}).length > 0 : !!errores[clave]));
+
+export const dniValido = (valor) => /^\d{6,9}$/.test(String(valor ?? '').replace(/[.\s]/g, ''));
+export const validarEntrega = ({ dni, cantidades, insumos, pideSexo, sexo, pideNombre, nombre, apellido }) => {
+  const errores = validarCantidades(cantidades, insumos);
+  if (!dniValido(dni)) errores.dni = 'Ingresá el DNI de la persona (solo números).';
+  if (pideSexo && !lleno(sexo)) errores.sexo = 'Elegí el sexo que figura en el DNI.';
+  if (pideNombre && !lleno(nombre)) errores.nombre = 'Ingresá el nombre.';
+  if (pideNombre && !lleno(apellido)) errores.apellido = 'Ingresá el apellido.';
+  return errores;
+};
+export const validarIngreso = ({ cantidades, insumos, origen, origen_detalle }) => {
+  const errores = validarCantidades(cantidades, insumos);
+  if (!lleno(origen)) errores.origen = 'Elegí de dónde viene el stock.';
+  else if (origen === ORIGEN_CON_DETALLE && !lleno(origen_detalle)) errores.origen_detalle = 'Contá de dónde viene.';
+  return errores;
+};
+export const validarTraspaso = ({ cantidades, insumos, destino }) => {
+  const errores = validarCantidades(cantidades, insumos);
+  if (!destino) errores.destino = 'Elegí a qué edificio se traspasa.';
+  return errores;
+};
+export const validarAjuste = ({ item_id, cantidad_contada, saldo_visto, motivo, detalle }) => {
+  const errores = {};
+  const valor = String(cantidad_contada ?? '').trim();
+  if (item_id == null) errores.item_id = 'Elegí el insumo que contaste.';
+  if (!/^\d+$/.test(valor)) errores.cantidad_contada = 'Ingresá lo que contaste: un número entero, 0 o más.';
+  else if (item_id != null && Number(valor) === Number(saldo_visto)) errores.cantidad_contada = 'Contaste lo mismo que hay: no hay nada que ajustar.';
+  if (!lleno(motivo)) errores.motivo = 'Elegí el motivo del ajuste.';
+  else if (MOTIVOS_CON_DETALLE.includes(motivo) && !lleno(detalle)) errores.detalle = 'Contá qué pasó.';
+  return errores;
+};
