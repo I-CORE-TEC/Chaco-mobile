@@ -7,6 +7,7 @@
 // significa también «falta un permiso parcial»): el resultado queda en `error.verificacionSinModulo`.
 import * as Crypto from 'expo-crypto';
 import { becasRequest } from './becasApi';
+import { hayRed } from './conectividad';
 import { verificarSinModulo } from './emergenciaPerfil';
 import { esSinModulo } from './sinModulo';
 import { formatDate } from '../utils/dates';
@@ -38,8 +39,15 @@ export const TEXTO_SALDO_CAMBIO = 'El saldo cambió mientras contabas. Volvé a 
 export const TEXTO_UUID_EN_USO = 'Ese envío ya era de otra operación. Se generó uno nuevo: revisá lo cargado y volvé a tocar el botón.';
 export const TEXTO_NO_HABILITADO = 'Este edificio o su institución no está habilitado para mover stock ahora (la institución no está activa, el edificio está inactivo o el destino no lleva stock). No se movió nada. Consultalo con quien administra el stock.';
 export const TEXTO_PERSONA_SIN_DATOS = 'No se encontró a la persona. Completá los datos que faltan para entregarle.';
-export const TEXTO_SIN_RED_ESCRITURA = 'Necesitás conexión para mandar esto. Lo cargado se conserva: reintentá cuando tengas señal.';
-export const TEXTO_REINTENTAR_ESCRITURA = 'No se pudo confirmar el envío. Reintentá: si ya había llegado, no se repite.';
+export const TEXTO_UUID_EN_USO_INCIERTO = 'El servidor dice que este envío ya es de otra operación. Puede que el primero sí haya llegado: no lo mandes de nuevo. Revisá los movimientos del edificio antes de cargar otra vez.';
+export const TEXTO_YA_EXISTIA_DISTINTO = 'Ya había un envío registrado con datos distintos a los de ahora, y no se repitió. Revisá los movimientos del edificio antes de cargar de nuevo.';
+// Sin conexión ANTES de enviar: no salió nada, lo cargado se puede editar.
+export const TEXTO_SIN_RED_ESCRITURA = 'Necesitás conexión para mandar esto. No se envió nada y lo cargado se conserva: reintentá cuando tengas señal.';
+// Resultado INCIERTO (timeout, corte con el pedido en camino, 5xx): pudo haber llegado. El formulario queda congelado.
+const REVISAR = 'El envío pudo haber llegado. Los datos quedan bloqueados: reintentá con los mismos datos (si ya había llegado, no se repite) o salí y revisá los movimientos del edificio antes de cargar de nuevo.';
+export const TEXTO_TIMEOUT_ESCRITURA = `El servidor tardó demasiado en responder. ${REVISAR}`;
+export const TEXTO_CORTE_ESCRITURA = `Se cortó la conexión mientras se enviaba. ${REVISAR}`;
+export const TEXTO_REINTENTAR_ESCRITURA = `No se pudo confirmar el envío. ${REVISAR}`;
 export const TEXTO_SIN_PERMISO_ESCRITURA = 'No tenés permiso para esta acción en este edificio.';
 
 const lista = (valor) => (Array.isArray(valor) ? valor : []);
@@ -321,9 +329,15 @@ export const postAjuste = enviar(RUTAS.ajustes);
 // Como clasificarError, pero con los textos de quien MANDA algo: sin red y los errores sin code no dicen «ver».
 export const clasificarErrorEscritura = (error) => {
   const clasificado = clasificarError(error);
-  if (clasificado.tipo === 'sin_red') return { ...clasificado, mensaje: TEXTO_SIN_RED_ESCRITURA };
+  // `incierto: true` = el pedido pudo haber llegado (timeout, 5xx/otro): el formulario se congela. Un `network` sin
+  // timeout es «sin conexión» (no salió); enviarOperacion lo vuelve corte si la red andaba al empezar.
+  if (clasificado.tipo === 'sin_red') {
+    return error?.timeout === true
+      ? { ...clasificado, mensaje: TEXTO_TIMEOUT_ESCRITURA, incierto: true }
+      : { ...clasificado, mensaje: TEXTO_SIN_RED_ESCRITURA };
+  }
   if (clasificado.tipo === 'sin_permiso' && clasificado.mensaje === TEXTO_SIN_PERMISO) return { ...clasificado, mensaje: TEXTO_SIN_PERMISO_ESCRITURA };
-  if (clasificado.tipo === 'otro') return { ...clasificado, mensaje: TEXTO_REINTENTAR_ESCRITURA };
+  if (clasificado.tipo === 'otro') return { ...clasificado, mensaje: TEXTO_REINTENTAR_ESCRITURA, incierto: true };
   return clasificado;
 };
 
@@ -333,25 +347,70 @@ export const textoEspera = (ms) => {
   return `Hay demasiados pedidos seguidos. Esperá ${segundos} ${segundos === 1 ? 'segundo' : 'segundos'} y volvé a probar. Lo cargado se conserva.`;
 };
 
-// Idempotencia (§17.1): UN uuid por formulario abierto. Un reintento (sin red, 5xx, saldo, validación…) usa el
-// mismo: si la primera vez llegó, el back contesta 200 `ya_existia` y no mueve el saldo. Solo UUID_EN_USO
-// (ese uuid es de otra operación y no escribió nada acá) genera uno nuevo.
+// Idempotencia (§17.1): UN uuid por formulario abierto. Un reintento usa el mismo: si la primera vez llegó, el back
+// contesta 200 `ya_existia` y no mueve el saldo. Pero el back NO compara las líneas ni el DNI: por eso, tras un
+// resultado INCIERTO (timeout, corte, 5xx) la sesión queda `incierto` y el cuerpo ya no puede cambiar (el hook
+// reusa el mismo `llamar`). Solo una respuesta definitiva del back (rechazo de saldo, validación…) lo levanta.
+// UUID_EN_USO sin incierto: ese uuid es de otra operación y no escribió nada → uno nuevo. Con incierto: puede ser la
+// misma operación con otro destino → se bloquea y se manda a revisar los movimientos.
+const DEFINITIVOS = ['saldo_insuficiente', 'saldo_cambio', 'validacion', 'persona_sin_datos', 'no_habilitado', 'sin_permiso', 'sin_modulo', 'no_encontrado'];
 export const crearSesionEnvio = (generar = nuevoUuid) => {
   let uuid = generar();
+  let incierto = false;
+  let bloqueado = false;
   return {
     uuid: () => uuid,
-    resolver: (clasificacion) => { if (clasificacion?.tipo === 'uuid_en_uso') uuid = generar(); },
+    incierto: () => incierto,
+    bloqueado: () => bloqueado,
+    // → la clasificación final (UUID_EN_USO tras un incierto cambia de texto y bloquea).
+    resolver: (clasificacion) => {
+      if (clasificacion?.incierto) incierto = true;
+      else if (clasificacion?.tipo === 'uuid_en_uso') {
+        if (incierto) {
+          bloqueado = true;
+          return { ...clasificacion, mensaje: TEXTO_UUID_EN_USO_INCIERTO, bloqueado: true };
+        }
+        uuid = generar();
+      } else if (DEFINITIVOS.includes(clasificacion?.tipo)) incierto = false;
+      return clasificacion;
+    },
+    exito: () => { incierto = false; },
+    // 200 `ya_existia` con otros datos: lo registrado no es lo que se ve en pantalla.
+    advertir: () => { bloqueado = true; },
   };
 };
 
-// `llamar(uuid)` hace el POST. → { ok: true, operacion } o { ok: false, clasificacion }.
-export const enviarOperacion = async (sesion, llamar) => {
+// ¿Los `movimientos` devueltos son los que se mandaron? `esperado`: `{ lineas }` (entregar, ingresar, traspasar: mismos
+// insumos y cantidades; el back solo devuelve el lado de origen) o `{ item_id, saldo_posterior }` (ajustar).
+export const coincideConLoEnviado = (operacion, esperado) => {
+  if (!esperado) return true;
+  const movimientos = lista(operacion?.movimientos);
+  if (esperado.lineas) {
+    const mandado = new Map(esperado.lineas.map((l) => [String(l.item_id), Number(l.cantidad)]));
+    return movimientos.length === mandado.size && movimientos.every((m) => mandado.get(String(m.item_id)) === Math.abs(numero(m.cantidad)));
+  }
+  return movimientos.length === 1 && String(movimientos[0].item_id) === String(esperado.item_id)
+    && movimientos[0].saldo_posterior === Number(esperado.saldo_posterior);
+};
+
+// `llamar(uuid)` hace el POST. → { ok: true, operacion, distinto } o { ok: false, clasificacion }. Sin red ANTES de
+// enviar (hayRed) no se manda nada. Un `network` sin timeout con red al empezar es un corte con el pedido en camino.
+export const enviarOperacion = async (sesion, llamar, esperado = null) => {
+  if (!(await hayRed())) {
+    return { ok: false, clasificacion: sesion.resolver(clasificarErrorEscritura({ network: true })), sinEnviar: true };
+  }
   try {
-    return { ok: true, operacion: await llamar(sesion.uuid()) };
+    const operacion = await llamar(sesion.uuid());
+    sesion.exito();
+    const distinto = operacion.ya_existia === true && !coincideConLoEnviado(operacion, esperado);
+    if (distinto) sesion.advertir();
+    return { ok: true, operacion, distinto };
   } catch (error) {
-    const clasificacion = clasificarErrorEscritura(error);
-    sesion.resolver(clasificacion);
-    return { ok: false, clasificacion, error };
+    let clasificacion = clasificarErrorEscritura(error);
+    if (clasificacion.tipo === 'sin_red' && !clasificacion.incierto) {
+      clasificacion = { ...clasificacion, mensaje: TEXTO_CORTE_ESCRITURA, incierto: true };
+    }
+    return { ok: false, clasificacion: sesion.resolver(clasificacion), error };
   }
 };
 
@@ -379,9 +438,12 @@ export const dniValido = (valor) => /^\d{6,9}$/.test(String(valor ?? '').replace
 export const validarEntrega = ({ dni, cantidades, insumos, pideSexo, sexo, pideNombre, nombre, apellido }) => {
   const errores = validarCantidades(cantidades, insumos);
   if (!dniValido(dni)) errores.dni = 'Ingresá el DNI de la persona (solo números).';
-  if (pideSexo && !lleno(sexo)) errores.sexo = 'Elegí el sexo que figura en el DNI.';
-  if (pideNombre && !lleno(nombre)) errores.nombre = 'Ingresá el nombre.';
-  if (pideNombre && !lleno(apellido)) errores.apellido = 'Ingresá el apellido.';
+  // Alta mínima (§17.1): con nombre y apellido no hace falta el sexo.
+  const conNombre = lleno(nombre) && lleno(apellido);
+  const pedirNombre = pideNombre || lleno(nombre) || lleno(apellido);
+  if (pideSexo && !lleno(sexo) && !conNombre) errores.sexo = 'Elegí el sexo que figura en el DNI, o cargá nombre y apellido.';
+  if (pedirNombre && !lleno(nombre)) errores.nombre = 'Ingresá el nombre.';
+  if (pedirNombre && !lleno(apellido)) errores.apellido = 'Ingresá el apellido.';
   return errores;
 };
 export const validarIngreso = ({ cantidades, insumos, origen, origen_detalle }) => {

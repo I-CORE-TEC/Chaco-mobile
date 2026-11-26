@@ -350,8 +350,10 @@ test('Entregar: SALDO_INSUFICIENTE muestra los saldos de ahora y no pierde lo ca
     await ui.escribir('Nombre', 'Ana');
     await ui.escribir('Apellido', 'Paz');
     await ui.confirmar('Entregar');
-    assert.ok(ui.hay('No se pudo confirmar'), '503: se puede reintentar');
-    await ui.confirmar('Entregar');
+    assert.ok(ui.hay('No se pudo confirmar') && ui.hay('pudo haber llegado'), '503: resultado incierto');
+    assert.equal(ui.campo('DNI').props.deshabilitado ?? ui.campo('DNI').props.editable === false, true, '503: el formulario queda congelado');
+    assert.deepEqual(ui.botones().filter(t => ['Reintentar', 'Salir', 'Entregar', 'Cancelar'].includes(t)), ['Reintentar', 'Salir']);
+    await ui.confirmar('Reintentar');
     assert.equal(ui.eventos.listo.length, 1);
     assert.equal(ui.toasts.at(-1).message, 'Entrega registrada.');
     assert.equal(enviados.length, 5);
@@ -475,10 +477,11 @@ test('Ingresar: solo insumos activos, origen con su detalle y comprobante; el cu
     assert.ok(ui.campo('Detalle del origen'));
     await ui.escribir('Detalle del origen', 'Vecinos');
     await ui.escribir('Comprobante (opcional)', 'R-001');
-    await ui.tocar('Registrar ingreso');
+    await ui.confirmar('Registrar ingreso');
+    assert.match(ui.alerts[0][1], /1 insumo/, 'Ingresar también pide confirmación');
     assert.ok(ui.hay('Contá de dónde viene.'), 'el error por campo del back sale bajo su campo');
     assert.equal(ui.campo('Cantidad de Agua (bidón)').props.value, '30');
-    await ui.tocar('Registrar ingreso');
+    await ui.confirmar('Registrar ingreso');
     assert.equal(ui.eventos.listo.length, 1);
     assert.equal(ui.toasts.at(-1).message, 'Ingreso registrado.');
     const uuid = enviados[0].cuerpo.uuid_cliente;
@@ -564,7 +567,7 @@ test('Ajustar: SALDO_CAMBIO muestra el saldo nuevo, conserva insumo, motivo y de
     assert.equal(enviados[1].cuerpo.saldo_visto, 7);
     assert.equal(enviados[1].cuerpo.cantidad_contada, 6);
     assert.equal(ui.campo('Cantidad contada').props.value, '6', 'un 503 no borra nada');
-    await ui.confirmar('Ajustar saldo');
+    await ui.confirmar('Reintentar');
     assert.equal(ui.eventos.listo.length, 1);
     assert.deepEqual([...new Set(enviados.map(e => e.cuerpo.uuid_cliente))].length, 1, 'el mismo uuid en los 3 envíos');
     assert.ok(enviados[0].ruta.endsWith('/stock/ajustes/'));
@@ -597,3 +600,204 @@ test('Saldo: los botones de escritura salen solo con `puede.*` en true y abren s
 });
 
 
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Resultado incierto (timeout, corte, 5xx): el formulario se congela y el reintento manda el MISMO cuerpo
+// ---------------------------------------------------------------------------------------------------------------------
+// En las pantallas, el pedido que se corta con la red andando (un timeout real tarda 30 s): resultado incierto igual.
+const timeout = () => { throw new TypeError('Network request failed'); };
+const DESTINOS = [{dispositivo: {id: 8, nombre: 'Escuela 12'}, edificio: {id: 5, nombre: 'Edificio Beta'}},
+  {dispositivo: {id: 9, nombre: 'Escuela 30'}, edificio: {id: 6, nombre: 'Edificio Gama'}}];
+const GET_TRASPASO = () => ({[RUTA_SALDO + 'destinos-traspaso/']: DESTINOS, [RUTA_SALDO]: SALDO()});
+const estaCongelado = (ui, etiqueta) => ui.campo(etiqueta).props.editable === false || ui.campo(etiqueta).props.deshabilitado === true || ui.campo(etiqueta).props.disabled === true;
+
+test('Incierto: tras un timeout no se puede cambiar el destino ni sale un segundo POST con otro cuerpo; el texto no es el de sin conexión', async () => {
+  const base = await preparar();
+  const enviados = servidor(base.r, {get: GET_TRASPASO(), posts: [timeout, response(201, OPERACION({tipo: 'TRASPASO_SALIDA'}))]});
+  const ui = await montar('StockTraspasoScreen', {}, base);
+  try {
+    await ui.elegir('Edificio de destino: Edificio Beta · Escuela 12');
+    await ui.escribir('Cantidad de Colchón (unidad)', '2');
+    await ui.confirmar('Traspasar');
+    assert.equal(enviados.length, 1);
+    assert.ok(ui.hay('Se cortó la conexión') && ui.hay('pudo haber llegado'), 'texto de pedido en camino, no el de sin conexión');
+    assert.equal(ui.hay('No se envió nada'), false);
+    assert.deepEqual(ui.botones().filter(t => ['Reintentar', 'Salir', 'Traspasar', 'Cancelar'].includes(t)), ['Reintentar', 'Salir']);
+    // El destino y las cantidades están deshabilitados.
+    assert.equal(ui.radio('Edificio de destino: Edificio Gama · Escuela 30').props.disabled, true);
+    assert.equal(ui.campo('Cantidad de Colchón (unidad)').props.editable === false || ui.campo('Cantidad de Colchón (unidad)').props.deshabilitado === true || ui.campo('Cantidad de Colchón (unidad)').props.disabled === true, true);
+    // Aunque el estado cambie por afuera (la UI deshabilitada no debería permitirlo), el reintento sale con el cuerpo viejo.
+    await ui.hacer(() => ui.radio('Edificio de destino: Edificio Gama · Escuela 30').props.onPress());
+    await ui.confirmar('Reintentar');
+    assert.equal(enviados.length, 2);
+    igual(enviados[1].cuerpo, enviados[0].cuerpo);
+    assert.equal(enviados[1].cuerpo.destino_edificio_id, 5, 'sigue yendo a Edificio Beta');
+    assert.equal(ui.eventos.listo.length, 1);
+  } finally { await ui.close(); }
+});
+
+test('Incierto: timeout → campos deshabilitados y el reintento manda el cuerpo idéntico (mismo uuid); un 5xx congela igual', async () => {
+  const base = await preparar();
+  const enviados = servidor(base.r, {get: {[RUTA_SALDO]: SALDO()}, posts: [timeout, rechazo(503, {}), response(201, OPERACION())]});
+  const ui = await montar('StockEntregaScreen', {}, base);
+  try {
+    await ui.escribir('DNI', '30111222');
+    await ui.escribir('Cantidad de Colchón (unidad)', '2');
+    await ui.escribir('Observación (opcional)', 'Frío');
+    await ui.confirmar('Entregar');
+    for (const etiqueta of ['DNI', 'Cantidad de Colchón (unidad)', 'Observación (opcional)']) assert.equal(estaCongelado(ui, etiqueta), true, etiqueta);
+    assert.equal(ui.boton('Buscar persona').props.disabled, true);
+    // El reintento ignora lo que haya en pantalla: va el cuerpo del primer envío.
+    await ui.confirmar('Reintentar');
+    assert.equal(enviados.length, 2);
+    igual(enviados[1].cuerpo, enviados[0].cuerpo);
+    assert.ok(ui.hay('pudo haber llegado'), '5xx: sigue congelado');
+    assert.equal(estaCongelado(ui, 'DNI'), true);
+    await ui.confirmar('Reintentar');
+    igual(enviados[2].cuerpo, enviados[0].cuerpo);
+    assert.equal(ui.eventos.listo.length, 1);
+  } finally { await ui.close(); }
+});
+
+test('Incierto: sin conexión ANTES de enviar no manda nada y el formulario se puede editar', async () => {
+  const base = await preparar();
+  const enviados = servidor(base.r, {get: GET_TRASPASO(), posts: [response(201, OPERACION())]});
+  const ui = await montar('StockTraspasoScreen', {}, base);
+  try {
+    await ui.elegir('Edificio de destino: Edificio Beta · Escuela 12');
+    await ui.escribir('Cantidad de Colchón (unidad)', '2');
+    base.r.setOnline(false);
+    await ui.confirmar('Traspasar');
+    assert.equal(enviados.length, 0, 'sin red no sale el POST');
+    assert.ok(ui.hay('No se envió nada'));
+    assert.deepEqual(ui.botones().filter(t => ['Reintentar', 'Salir', 'Traspasar', 'Cancelar'].includes(t)), ['Traspasar', 'Cancelar'], 'no se congela');
+    await ui.elegir('Edificio de destino: Edificio Gama · Escuela 30');
+    base.r.setOnline(true);
+    await ui.confirmar('Traspasar');
+    assert.equal(enviados.length, 1);
+    assert.equal(enviados[0].cuerpo.destino_edificio_id, 6, 'se pudo cambiar el destino: nunca salió el primero');
+  } finally { await ui.close(); }
+});
+
+test('Incierto: UUID_EN_USO después de un incierto NO invita a reenviar: manda a revisar los movimientos', async () => {
+  const base = await preparar();
+  const enviados = servidor(base.r, {get: GET_TRASPASO(), posts: [timeout, rechazo(409, {code: 'UUID_EN_USO', detail: 'x'})]});
+  const ui = await montar('StockTraspasoScreen', {}, base);
+  try {
+    await ui.elegir('Edificio de destino: Edificio Beta · Escuela 12');
+    await ui.escribir('Cantidad de Colchón (unidad)', '2');
+    await ui.confirmar('Traspasar');
+    await ui.confirmar('Reintentar');
+    assert.ok(ui.hay('Revisá los movimientos') && ui.hay('no lo mandes de nuevo'));
+    assert.equal(ui.hay('volvé a tocar el botón'), false);
+    assert.equal(ui.boton('Reintentar').props.disabled, true, 'ya no se puede reenviar');
+    await ui.confirmar('Reintentar');
+    assert.equal(enviados.length, 2, 'ni un tercer POST');
+    assert.equal(enviados[0].cuerpo.uuid_cliente, enviados[1].cuerpo.uuid_cliente, 'no se regeneró el uuid');
+    assert.equal(ui.eventos.listo.length, 0);
+  } finally { await ui.close(); }
+});
+
+test('Incierto: 200 ya_existia con movimientos distintos a lo enviado → advertencia, no toast de éxito ni salida; con los mismos, éxito', async () => {
+  const base = await preparar();
+  const enviados = servidor(base.r, {get: {[RUTA_SALDO]: SALDO()}, posts: [
+    timeout,
+    response(200, OPERACION({ya_existia: true, movimientos: [{item_id: 12, nombre: 'Colchón', unidad: 'unidad', cantidad: -5, saldo_posterior: 13}]})),
+  ]});
+  const ui = await montar('StockEntregaScreen', {}, base);
+  try {
+    await ui.escribir('DNI', '30111222');
+    await ui.escribir('Cantidad de Colchón (unidad)', '2');
+    await ui.confirmar('Entregar');
+    await ui.confirmar('Reintentar');
+    assert.equal(enviados.length, 2);
+    assert.ok(ui.hay('datos distintos'), 'advertencia');
+    assert.equal(ui.toasts.some(t => t.type === 'success'), false, 'no hay toast de éxito');
+    assert.equal(ui.eventos.listo.length, 0, 'no sale como si hubiera registrado lo de la pantalla');
+    assert.equal(ui.boton('Reintentar').props.disabled, true);
+  } finally { await ui.close(); }
+
+  const otra = await preparar();
+  servidor(otra.r, {get: {[RUTA_SALDO]: SALDO()}, posts: [timeout,
+    response(200, OPERACION({ya_existia: true, movimientos: [{item_id: 12, nombre: 'Colchón', unidad: 'unidad', cantidad: -2, saldo_posterior: 16}]}))]});
+  const ui2 = await montar('StockEntregaScreen', {}, otra);
+  try {
+    await ui2.escribir('DNI', '30111222');
+    await ui2.escribir('Cantidad de Colchón (unidad)', '2');
+    await ui2.confirmar('Entregar');
+    await ui2.confirmar('Reintentar');
+    assert.equal(ui2.eventos.listo.length, 1);
+    assert.match(ui2.toasts.at(-1).message, /ya estaba registrado/);
+  } finally { await ui2.close(); }
+});
+
+test('coincideConLoEnviado: líneas (en valor absoluto) y ajuste por insumo y saldo_posterior', async () => {
+  const {s} = await preparar();
+  const op = (movimientos) => ({movimientos});
+  assert.equal(s.coincideConLoEnviado(op([{item_id: 12, cantidad: -2}, {item_id: 15, cantidad: -1}]), {lineas: [{item_id: 15, cantidad: 1}, {item_id: 12, cantidad: 2}]}), true);
+  assert.equal(s.coincideConLoEnviado(op([{item_id: 12, cantidad: 5}]), {lineas: [{item_id: 12, cantidad: 2}]}), false);
+  assert.equal(s.coincideConLoEnviado(op([{item_id: 12, cantidad: -2}]), {lineas: [{item_id: 12, cantidad: 2}, {item_id: 15, cantidad: 1}]}), false);
+  assert.equal(s.coincideConLoEnviado(op([{item_id: 20, cantidad: -2}]), {lineas: [{item_id: 12, cantidad: 2}]}), false);
+  assert.equal(s.coincideConLoEnviado(op([{item_id: 12, cantidad: -8, saldo_posterior: 10}]), {item_id: 12, saldo_posterior: 10}), true);
+  assert.equal(s.coincideConLoEnviado(op([{item_id: 20, cantidad: -8, saldo_posterior: 10}]), {item_id: 12, saldo_posterior: 10}), false);
+  assert.equal(s.coincideConLoEnviado(op([{item_id: 12, cantidad: -8, saldo_posterior: 9}]), {item_id: 12, saldo_posterior: 10}), false);
+});
+
+test('Doble toque en el mismo frame: dos enviar sin await en el medio mandan UN solo POST (guarda por ref)', async () => {
+  const base = await preparar();
+  let liberar;
+  const enviados = servidor(base.r, {get: {[RUTA_SALDO]: SALDO()}, posts: [() => new Promise(resolve => { liberar = () => resolve(response(201, OPERACION())); })]});
+  const ui = await montar('StockIngresoScreen', {}, base);
+  try {
+    await ui.escribir('Cantidad de Agua (bidón)', '30');
+    await ui.elegir('Origen: Donación');
+    await ui.tocar('Registrar ingreso');
+    const confirmar = ui.alerts.at(-1)[2].find(b => b.style !== 'cancel').onPress;
+    // Dos confirmaciones dentro del mismo frame, sin re-render entre las dos.
+    await renderer.act(async () => { confirmar(); confirmar(); await esperar(10); });
+    assert.equal(enviados.length, 1, 'un solo POST');
+    await ui.hacer(() => liberar());
+    assert.equal(ui.eventos.listo.length, 1);
+  } finally { await ui.close(); }
+});
+
+test('Entregar: con sexo pedido también se pueden cargar nombre y apellido; con los dos no hace falta el sexo (alta mínima, §17.1)', async () => {
+  const {s} = await preparar();
+  const ok = {dni: '30111222', cantidades: {12: '1'}, insumos: [{item_id: 12}]};
+  assert.ok(s.validarEntrega({...ok, pideSexo: true}).sexo, 'sin sexo ni nombre: falta el sexo');
+  assert.equal(s.hayErrores(s.validarEntrega({...ok, pideSexo: true, nombre: 'Ana', apellido: 'Paz'})), false, 'con nombre y apellido no se exige el sexo');
+  assert.ok(s.validarEntrega({...ok, pideSexo: true, nombre: 'Ana'}).apellido, 'a medias: falta el apellido');
+
+  const base = await preparar();
+  const enviados = servidor(base.r, {get: {[RUTA_SALDO + 'persona/']: {persona: null, historial: []}, [RUTA_SALDO]: SALDO()}, posts: [response(201, OPERACION())]});
+  const ui = await montar('StockEntregaScreen', {}, base);
+  try {
+    await ui.escribir('DNI', '30111222');
+    await ui.escribir('Cantidad de Colchón (unidad)', '2');
+    await ui.tocar('Buscar persona');
+    assert.ok(ui.radio('Sexo: Femenino') && ui.campo('Nombre (si no sabés el sexo)') && ui.campo('Apellido (si no sabés el sexo)'), 'con el aviso de «cargá su nombre y apellido» están los campos');
+    await ui.escribir('Nombre (si no sabés el sexo)', 'Ana');
+    await ui.escribir('Apellido (si no sabés el sexo)', 'Paz');
+    await ui.confirmar('Entregar');
+    assert.equal(enviados.length, 1);
+    igual(enviados[0].cuerpo, {uuid_cliente: enviados[0].cuerpo.uuid_cliente, dni: '30111222', lineas: [{item_id: 12, cantidad: 2}], nombre: 'Ana', apellido: 'Paz'});
+  } finally { await ui.close(); }
+});
+
+test('Incierto: un timeout real se clasifica con su propio texto (no el de sin conexión) y congela; sin red antes de enviar no', async () => {
+  const {s} = await preparar();
+  const c = (error) => JSON.parse(JSON.stringify(s.clasificarErrorEscritura(error)));
+  const t = c({network: true, timeout: true});
+  assert.deepEqual([t.tipo, t.incierto, t.mensaje], ['sin_red', true, s.TEXTO_TIMEOUT_ESCRITURA]);
+  assert.notEqual(s.TEXTO_TIMEOUT_ESCRITURA, s.TEXTO_SIN_RED_ESCRITURA);
+  assert.equal(c({network: true}).incierto, undefined, 'sin conexión (sin timeout): no salió');
+  assert.equal(c({status: 503, payload: {}}).incierto, true);
+  assert.equal(c({status: 409, payload: {code: 'SALDO_INSUFICIENTE'}}).incierto, undefined);
+  const sesion = s.crearSesionEnvio(() => 'u');
+  const llamar = () => { throw Object.assign(new Error('x'), {network: true, timeout: true}); };
+  assert.equal((await s.enviarOperacion(sesion, llamar)).clasificacion.mensaje, s.TEXTO_TIMEOUT_ESCRITURA);
+  assert.equal(sesion.incierto(), true);
+  // Un rechazo definitivo del back (nada se asentó) levanta el congelado.
+  assert.equal(sesion.resolver({tipo: 'saldo_insuficiente'}).tipo, 'saldo_insuficiente');
+  assert.equal(sesion.incierto(), false);
+});

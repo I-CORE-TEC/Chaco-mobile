@@ -42,15 +42,18 @@ export default function StockAjusteScreen({ dispositivoId, edificioId, onListo, 
   const saldoVisto = elegido ? (vistos[elegido.item_id] ?? elegido.saldo) : null;
 
   const hayCambios = itemId !== null || contada.trim() !== '' || motivo !== '' || detalle.trim() !== '';
-  const { enviando, aviso, falla, enviar } = useEnvioStock({ hayCambios, onCambios, onEnviando, onListo, onSinModulo, onNoEncontrado });
+  const { enviando: enviandoPedido, congelado, sinReintento, aviso, falla, enviar } = useEnvioStock({ hayCambios, onCambios, onEnviando, onListo, onSinModulo, onNoEncontrado });
 
+  // Tras un resultado incierto el formulario queda congelado: solo «Reintentar» (mismo cuerpo) y «Salir».
+  const enviando = enviandoPedido || congelado;
   const datos = { item_id: itemId, cantidad_contada: contada, saldo_visto: saldoVisto, motivo, detalle };
   const erroresCliente = intentado ? validarAjuste(datos) : {};
   const erroresDe = (campo) => [...(erroresCliente[campo] ? [erroresCliente[campo]] : []), ...(erroresServidor[campo] || [])];
 
   const mandar = async () => {
     setErroresServidor({});
-    const r = await enviar((uuid) => postAjuste(dispositivoId, edificioId, armarAjuste({ uuid_cliente: uuid, ...datos })), 'Ajuste registrado.');
+    const r = await enviar((uuid) => postAjuste(dispositivoId, edificioId, armarAjuste({ uuid_cliente: uuid, ...datos })), 'Ajuste registrado.',
+      { item_id: itemId, saldo_posterior: Number(contada) });
     if (r.ok || !r.clasificacion) return;
     const c = r.clasificacion;
     if (c.tipo === 'saldo_cambio') {
@@ -63,7 +66,7 @@ export default function StockAjusteScreen({ dispositivoId, edificioId, onListo, 
   };
 
   const ajustar = () => {
-    if (enviando) return;
+    if (enviandoPedido || congelado) return;
     setIntentado(true);
     if (hayErrores(validarAjuste(datos))) return;
     showAlert('Ajustar saldo', `El saldo de ${elegido.nombre} pasa de ${textoCantidad(saldoVisto, elegido.unidad)} a ${textoCantidad(Number(contada), elegido.unidad)}. No se puede deshacer desde la app.`, [
@@ -105,8 +108,9 @@ export default function StockAjusteScreen({ dispositivoId, edificioId, onListo, 
           errores={[...erroresDe('detalle'), ...(erroresServidor.non_field_errors || [])]} />
       </Tarjeta>
 
-      <CustomButton title="Ajustar saldo" size="L" iconLeft="create-outline" loading={enviando} disabled={enviando || insumos.length === 0} onPress={ajustar} />
-      <CustomButton title="Cancelar" size="L" variant="secondary" disabled={enviando} onPress={() => onCancelar?.()} />
+      <CustomButton title={congelado ? 'Reintentar' : 'Ajustar saldo'} size="L" iconLeft="create-outline" loading={enviandoPedido}
+        disabled={enviandoPedido || sinReintento || insumos.length === 0} onPress={congelado ? mandar : ajustar} />
+      <CustomButton title={congelado ? 'Salir' : 'Cancelar'} size="L" variant="secondary" disabled={enviandoPedido} onPress={() => onCancelar?.()} />
     </ScrollView>
   );
 }

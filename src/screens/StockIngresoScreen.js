@@ -4,6 +4,7 @@ import CustomButton from '../components/CustomButton';
 import { ErrorPlazas } from '../components/PlazasUi';
 import { Aviso, Campo, Mensajes, Opciones, TablaCantidades, Tarjeta } from '../components/StockUi';
 import { useTheme } from '../context/ThemeContext';
+import { useToast } from '../context/ToastContext';
 import useCargaStock from '../hooks/useCargaStock';
 import useEnvioStock from '../hooks/useEnvioStock';
 import {
@@ -17,6 +18,7 @@ export const SIN_INSUMOS_ACTIVOS = 'No hay insumos activos para cargar. Pedí qu
 // un comprobante opcional. Solo insumos activos. Con conexión y sin cola; el `uuid_cliente` nace al abrir y se conserva.
 export default function StockIngresoScreen({ dispositivoId, edificioId, onListo, onCancelar, onNoEncontrado, onSinModulo, onEnviando, onCambios }) {
   const { theme } = useTheme();
+  const { showAlert } = useToast();
   const [origen, setOrigen] = useState('');
   const [origenDetalle, setOrigenDetalle] = useState('');
   const [comprobante, setComprobante] = useState('');
@@ -30,21 +32,32 @@ export default function StockIngresoScreen({ dispositivoId, edificioId, onListo,
   const insumos = (saldo?.insumos_activos || []).map((i) => ({ item_id: i.item_id, nombre: i.nombre, unidad: i.unidad, saldo: saldos[i.item_id] ?? 0, activo: true }));
 
   const hayCambios = origen !== '' || comprobante.trim() !== '' || Object.values(cantidades).some((c) => String(c).trim() !== '');
-  const { enviando, aviso, falla, enviar } = useEnvioStock({ hayCambios, onCambios, onEnviando, onListo, onSinModulo, onNoEncontrado });
+  const { enviando: enviandoPedido, congelado, sinReintento, aviso, falla, enviar } = useEnvioStock({ hayCambios, onCambios, onEnviando, onListo, onSinModulo, onNoEncontrado });
 
+  // Tras un resultado incierto el formulario queda congelado: solo «Reintentar» (mismo cuerpo) y «Salir».
+  const enviando = enviandoPedido || congelado;
   const datos = { cantidades, insumos, origen, origen_detalle: origenDetalle };
   const erroresCliente = intentado ? validarIngreso(datos) : {};
   const erroresDe = (campo) => [...(erroresCliente[campo] ? [erroresCliente[campo]] : []), ...(erroresServidor[campo] || [])];
 
-  const registrar = async () => {
-    if (enviando) return;
-    setIntentado(true);
+  const mandar = async () => {
     setErroresServidor({});
-    if (hayErrores(validarIngreso(datos))) return;
+    const lineas = armarLineas(cantidades, insumos);
     const r = await enviar((uuid) => postIngreso(dispositivoId, edificioId, armarIngreso({
-      uuid_cliente: uuid, lineas: armarLineas(cantidades, insumos), origen, origen_detalle: origenDetalle, comprobante,
-    })), 'Ingreso registrado.');
+      uuid_cliente: uuid, lineas, origen, origen_detalle: origenDetalle, comprobante,
+    })), 'Ingreso registrado.', { lineas });
     if (!r.ok && r.clasificacion?.tipo === 'validacion') setErroresServidor(r.clasificacion.errores || {});
+  };
+
+  const registrar = () => {
+    if (enviandoPedido || congelado) return;
+    setIntentado(true);
+    if (hayErrores(validarIngreso(datos))) return;
+    const lineas = armarLineas(cantidades, insumos);
+    showAlert('Ingresar stock', `Se suman ${lineas.length} ${lineas.length === 1 ? 'insumo' : 'insumos'} al stock de este edificio. No se puede deshacer desde la app.`, [
+      { text: 'Revisar', style: 'cancel' },
+      { text: 'Ingresar', onPress: mandar },
+    ]);
   };
 
   if (cargando && !saldo) return <View style={styles.centro}><ActivityIndicator size="large" color={theme.colors.primary} accessibilityLabel="Cargando los insumos" /></View>;
@@ -71,8 +84,9 @@ export default function StockIngresoScreen({ dispositivoId, edificioId, onListo,
           ...(erroresServidor.non_field_errors || [])]} prefijo="lineas" />
       </Tarjeta>
 
-      <CustomButton title="Registrar ingreso" size="L" iconLeft="add-circle-outline" loading={enviando} disabled={enviando || insumos.length === 0} onPress={registrar} />
-      <CustomButton title="Cancelar" size="L" variant="secondary" disabled={enviando} onPress={() => onCancelar?.()} />
+      <CustomButton title={congelado ? 'Reintentar' : 'Registrar ingreso'} size="L" iconLeft="add-circle-outline" loading={enviandoPedido}
+        disabled={enviandoPedido || sinReintento || insumos.length === 0} onPress={congelado ? mandar : registrar} />
+      <CustomButton title={congelado ? 'Salir' : 'Cancelar'} size="L" variant="secondary" disabled={enviandoPedido} onPress={() => onCancelar?.()} />
     </ScrollView>
   );
 }

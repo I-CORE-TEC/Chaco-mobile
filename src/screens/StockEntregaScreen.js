@@ -46,8 +46,10 @@ export default function StockEntregaScreen({ dispositivoId, edificioId, onListo,
   const insumos = (saldo?.saldos || []).filter((s) => s.cantidad > 0).map((s) => ({ item_id: s.item_id, nombre: s.nombre, unidad: s.unidad, saldo: s.cantidad, activo: s.activo }));
 
   const hayCambios = dni.trim() !== '' || observacion.trim() !== '' || Object.values(cantidades).some((c) => String(c).trim() !== '');
-  const { enviando, aviso, falla, enviar } = useEnvioStock({ hayCambios, onCambios, onEnviando, onListo, onSinModulo, onNoEncontrado });
+  const { enviando: enviandoPedido, congelado, sinReintento, aviso, falla, enviar } = useEnvioStock({ hayCambios, onCambios, onEnviando, onListo, onSinModulo, onNoEncontrado });
 
+  // Tras un resultado incierto el formulario queda congelado: solo «Reintentar» (mismo cuerpo) y «Salir».
+  const enviando = enviandoPedido || congelado;
   const datos = { dni, cantidades, insumos, pideSexo, sexo, pideNombre, nombre, apellido };
   const erroresCliente = intentado ? validarEntrega(datos) : {};
   const erroresDe = (campo) => [...(erroresCliente[campo] ? [erroresCliente[campo]] : []), ...(erroresServidor[campo] || [])];
@@ -86,10 +88,12 @@ export default function StockEntregaScreen({ dispositivoId, edificioId, onListo,
   const mandar = async () => {
     setErroresServidor({});
     setRechazos({});
+    const lineas = armarLineas(cantidades, insumos);
+    // Con nombre y apellido (alta mínima) el sexo es opcional: se manda lo que haya.
     const r = await enviar((uuid) => postEntrega(dispositivoId, edificioId, armarEntrega({
-      uuid_cliente: uuid, dni, lineas: armarLineas(cantidades, insumos), sexo: pideSexo ? sexo : '', nombre: pideNombre ? nombre : '',
-      apellido: pideNombre ? apellido : '', observacion,
-    })), 'Entrega registrada.');
+      uuid_cliente: uuid, dni, lineas, sexo: pideSexo ? sexo : '', nombre: pideSexo || pideNombre ? nombre : '',
+      apellido: pideSexo || pideNombre ? apellido : '', observacion,
+    })), 'Entrega registrada.', { lineas });
     if (r.ok || !r.clasificacion) return;
     const c = r.clasificacion;
     if (c.tipo === 'saldo_insuficiente') setRechazos(Object.fromEntries(c.saldos.map((s) => [s.item_id, s])));
@@ -97,7 +101,7 @@ export default function StockEntregaScreen({ dispositivoId, edificioId, onListo,
   };
 
   const entregar = () => {
-    if (enviando) return;
+    if (enviandoPedido || congelado) return;
     setIntentado(true);
     if (hayErrores(validarEntrega(datos))) return;
     const lineas = armarLineas(cantidades, insumos);
@@ -120,10 +124,10 @@ export default function StockEntregaScreen({ dispositivoId, edificioId, onListo,
       <Tarjeta titulo="¿A quién?" ayuda="Se busca en el legajo; si no está, en el Registro con el sexo.">
         <Campo etiqueta="DNI *" valor={dni} onCambiar={cambiarDni} errores={erroresDe('dni')} deshabilitado={enviando} teclado="number-pad" maxLength={12} />
         {pideSexo ? <Opciones etiqueta="Sexo *" opciones={SEXOS} elegida={sexo} onElegir={setSexo} deshabilitado={enviando} errores={erroresDe('sexo')} /> : null}
-        {pideNombre ? (
+        {pideSexo || pideNombre ? (
           <>
-            <Campo etiqueta="Nombre *" valor={nombre} onCambiar={setNombre} errores={erroresDe('nombre')} deshabilitado={enviando} />
-            <Campo etiqueta="Apellido *" valor={apellido} onCambiar={setApellido} errores={erroresDe('apellido')} deshabilitado={enviando} />
+            <Campo etiqueta={pideNombre ? 'Nombre *' : 'Nombre (si no sabés el sexo)'} valor={nombre} onCambiar={setNombre} errores={erroresDe('nombre')} deshabilitado={enviando} />
+            <Campo etiqueta={pideNombre ? 'Apellido *' : 'Apellido (si no sabés el sexo)'} valor={apellido} onCambiar={setApellido} errores={erroresDe('apellido')} deshabilitado={enviando} />
           </>
         ) : null}
         <Aviso mensaje={avisoPersona} tono="warning" icono="information-circle-outline" />
@@ -159,8 +163,9 @@ export default function StockEntregaScreen({ dispositivoId, edificioId, onListo,
         <Mensajes lista={[...(erroresServidor.non_field_errors || []), ...(erroresServidor.persona || [])]} prefijo="nf" />
       </Tarjeta>
 
-      <CustomButton title="Entregar" size="L" iconLeft="checkmark-circle-outline" loading={enviando} disabled={enviando || insumos.length === 0} onPress={entregar} />
-      <CustomButton title="Cancelar" size="L" variant="secondary" disabled={enviando} onPress={() => onCancelar?.()} />
+      <CustomButton title={congelado ? 'Reintentar' : 'Entregar'} size="L" iconLeft="checkmark-circle-outline" loading={enviandoPedido}
+        disabled={enviandoPedido || sinReintento || insumos.length === 0} onPress={congelado ? mandar : entregar} />
+      <CustomButton title={congelado ? 'Salir' : 'Cancelar'} size="L" variant="secondary" disabled={enviandoPedido} onPress={() => onCancelar?.()} />
     </ScrollView>
   );
 }

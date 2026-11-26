@@ -37,8 +37,10 @@ export default function StockTraspasoScreen({ dispositivoId, edificioId, onListo
   const destino = (destinos || []).find((d) => idDestino(d) === destinoId) || null;
 
   const hayCambios = destinoId !== '' || observacion.trim() !== '' || Object.values(cantidades).some((c) => String(c).trim() !== '');
-  const { enviando, aviso, falla, enviar } = useEnvioStock({ hayCambios, onCambios, onEnviando, onListo, onSinModulo, onNoEncontrado });
+  const { enviando: enviandoPedido, congelado, sinReintento, aviso, falla, enviar } = useEnvioStock({ hayCambios, onCambios, onEnviando, onListo, onSinModulo, onNoEncontrado });
 
+  // Tras un resultado incierto el formulario queda congelado: solo «Reintentar» (mismo cuerpo) y «Salir».
+  const enviando = enviandoPedido || congelado;
   const datos = { cantidades, insumos, destino };
   const erroresCliente = intentado ? validarTraspaso(datos) : {};
   const erroresDestino = [...(erroresCliente.destino ? [erroresCliente.destino] : []), ...(erroresServidor.destino || []), ...(erroresServidor.destino_dispositivo_id || []),
@@ -47,10 +49,11 @@ export default function StockTraspasoScreen({ dispositivoId, edificioId, onListo
   const mandar = async () => {
     setErroresServidor({});
     setRechazos({});
+    const lineas = armarLineas(cantidades, insumos);
     const r = await enviar((uuid) => postTraspaso(dispositivoId, edificioId, armarTraspaso({
       uuid_cliente: uuid, destino_dispositivo_id: destino.dispositivo.id, destino_edificio_id: destino.edificio.id,
-      lineas: armarLineas(cantidades, insumos), observacion,
-    })), 'Traspaso registrado.');
+      lineas, observacion,
+    })), 'Traspaso registrado.', { lineas });
     if (r.ok || !r.clasificacion) return;
     const c = r.clasificacion;
     if (c.tipo === 'saldo_insuficiente') setRechazos(Object.fromEntries(c.saldos.map((s) => [s.item_id, s])));
@@ -58,7 +61,7 @@ export default function StockTraspasoScreen({ dispositivoId, edificioId, onListo
   };
 
   const traspasar = () => {
-    if (enviando) return;
+    if (enviandoPedido || congelado) return;
     setIntentado(true);
     if (hayErrores(validarTraspaso(datos))) return;
     const lineas = armarLineas(cantidades, insumos);
@@ -100,9 +103,9 @@ export default function StockTraspasoScreen({ dispositivoId, edificioId, onListo
           errores={erroresServidor.observacion || []} />
       </Tarjeta>
 
-      <CustomButton title="Traspasar" size="L" iconLeft="swap-horizontal-outline" loading={enviando}
-        disabled={enviando || insumos.length === 0 || opcionesDestino.length === 0} onPress={traspasar} />
-      <CustomButton title="Cancelar" size="L" variant="secondary" disabled={enviando} onPress={() => onCancelar?.()} />
+      <CustomButton title={congelado ? 'Reintentar' : 'Traspasar'} size="L" iconLeft="swap-horizontal-outline" loading={enviandoPedido}
+        disabled={enviandoPedido || sinReintento || insumos.length === 0 || opcionesDestino.length === 0} onPress={congelado ? mandar : traspasar} />
+      <CustomButton title={congelado ? 'Salir' : 'Cancelar'} size="L" variant="secondary" disabled={enviandoPedido} onPress={() => onCancelar?.()} />
     </ScrollView>
   );
 }
