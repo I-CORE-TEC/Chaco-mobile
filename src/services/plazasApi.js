@@ -124,6 +124,7 @@ export const fechaCorta = (valor, { hora = false } = {}) => {
 
 // ---- Acciones (las implementa el PR de acciones; acá solo sus nombres) ----
 export const ACCIONES_PLAZA = {
+  ingresar: 'Ingresar persona',
   egresar: 'Registrar egreso',
   reubicar: 'Cambiar de cama',
   liberar: 'Liberar reserva',
@@ -136,7 +137,11 @@ export const ACCIONES_ESTADIA = { egresar: 'Egreso', reubicar: 'Cambiar de cama'
 const listaDeAcciones = (acciones, etiquetas) => (Array.isArray(acciones) ? acciones : [])
   .filter((accion) => typeof etiquetas[accion] === 'string')
   .map((accion) => ({ accion, titulo: etiquetas[accion] }));
-export const accionesDePlaza = (plaza) => listaDeAcciones(plaza?.acciones, ACCIONES_PLAZA);
+// `ingresar` va primero: es la acción principal de una cama libre.
+export const accionesDePlaza = (plaza) => {
+  const lista = listaDeAcciones(plaza?.acciones, ACCIONES_PLAZA);
+  return [...lista.filter((a) => a.accion === 'ingresar'), ...lista.filter((a) => a.accion !== 'ingresar')];
+};
 export const accionesDeEstadia = (estadia) => listaDeAcciones(estadia?.acciones, ACCIONES_ESTADIA);
 
 // ---- Normalización de respuestas ----

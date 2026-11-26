@@ -69,6 +69,7 @@ async function montarApp() {
     '../screens/PlazasEgresoScreen': {__esModule: true, default: stub('egreso')},
     '../screens/PlazasCambioCamaScreen': {__esModule: true, default: stub('cambio')},
     '../screens/PlazaAccionSheet': {__esModule: true, default: stub('hoja')},
+    '../screens/PlazasIngresoScreen': {__esModule: true, default: stub('ingreso')},
     '../screens/StockEdificiosScreen': {__esModule: true, default: () => null},
     '../screens/StockSaldoScreen': {__esModule: true, default: () => null},
     '../screens/StockEntregaScreen': {__esModule: true, default: () => null},
@@ -92,7 +93,7 @@ async function montarApp() {
   // Las pantallas que no están montadas no se renderizan: `p.x` queda con las últimas props, así que se mira el árbol.
   const montada = nombre => tree.root.findAll(n => n.type === mocks[{
     edificios: '../screens/PlazasEdificiosScreen', mapa: '../screens/PlazasMapaScreen', estadias: '../screens/PlazasEstadiasScreen',
-    egreso: '../screens/PlazasEgresoScreen', cambio: '../screens/PlazasCambioCamaScreen', hoja: '../screens/PlazaAccionSheet',
+    egreso: '../screens/PlazasEgresoScreen', cambio: '../screens/PlazasCambioCamaScreen', hoja: '../screens/PlazaAccionSheet', ingreso: '../screens/PlazasIngresoScreen',
     inicio: '../screens/EmergenciaInicioScreen'}[nombre]].default).length > 0;
   return {p, alerts, toasts, pedidosMapa, respuestaMapa, hacer, montada, titulo: () => banner().props.title,
     atras: () => hacer(() => banner().props.onBackPress()), close: () => renderer.act(async () => tree.unmount())};
@@ -263,5 +264,33 @@ test('Plazas: desde estadías, un mapa descartado se vuelve a pedir y los filtro
     await ui.hacer(() => ui.p.cambio.onListo({...MAPA_9, resumen: {ocupadas: 8}}));
     assert.equal(ui.pedidosMapa.length, 1);
     assert.equal(ui.p.estadias.total, 8);
+  } finally { await ui.close(); }
+});
+
+test('Plazas: ingresar abre la pantalla de ingreso con la cama y el sector; onListo repinta y vuelve al mapa', async () => {
+  const ui = await montarApp();
+  try {
+    await alMapa(ui);
+    const plaza = {id: 41, codigo: 'A2-03', acciones: ['ingresar']};
+    await ui.hacer(() => ui.p.mapa.abrirAccion('ingresar', {plaza, sector: {id: 5, nombre: 'Aula 1'}}));
+    assert.ok(ui.montada('ingreso'));
+    assert.equal(ui.titulo(), 'Ingresar persona');
+    assert.equal(ui.p.ingreso.plaza.id, 41);
+    assert.equal(ui.p.ingreso.sector.nombre, 'Aula 1');
+    assert.equal(ui.p.ingreso.dispositivoId, 3);
+    await ui.hacer(() => ui.p.ingreso.onListo(null));
+    assert.ok(ui.montada('mapa'));
+  } finally { await ui.close(); }
+});
+
+test('Plazas: Atrás en el ingreso con datos cargados pregunta antes de salir', async () => {
+  const ui = await montarApp();
+  try {
+    await alMapa(ui);
+    await ui.hacer(() => ui.p.mapa.abrirAccion('ingresar', {plaza: {id: 41, codigo: 'A2-03'}}));
+    await ui.hacer(() => ui.p.ingreso.onCambios(true));
+    await ui.atras();
+    assert.ok(ui.montada('ingreso'), 'no sale todavía');
+    assert.equal(ui.alerts.length, 1);
   } finally { await ui.close(); }
 });

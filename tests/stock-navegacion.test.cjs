@@ -77,7 +77,7 @@ async function montarApp({perfilGuardado = null} = {}) {
   for (const nombre of ['EmergenciaMisEnviosScreen', 'EmergenciaFormulario1Screen', 'EmergenciaMisDispositivosScreen', 'EmergenciaEntregasScreen',
     'EmergenciaRecibirEntregaScreen', 'EmergenciaLlegadaBuscarScreen', 'EmergenciaDerivacionScreen', 'EmergenciaIntegrantesScreen',
     'EmergenciaFichaScreen', 'EmergenciaCierreScreen', 'EmergenciaPuertaScreen', 'PlazasMapaScreen', 'PlazasEstadiasScreen',
-    'PlazasEgresoScreen', 'PlazasCambioCamaScreen', 'PlazaAccionSheet']) {
+    'PlazasEgresoScreen', 'PlazasCambioCamaScreen', 'PlazasIngresoScreen', 'PlazaAccionSheet']) {
     mocks['../screens/' + nombre] = {__esModule: true, default: () => null};
   }
   const modulo = loadApp(mocks);

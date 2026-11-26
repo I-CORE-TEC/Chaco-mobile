@@ -18,7 +18,7 @@ const COLUMNAS = 4;
 //
 // El mapa vive en quien monta la pantalla (`mapa`): la pantalla lo pide y lo informa con
 // `onMapaActualizado(mapa)`. Las acciones (PR de acciones) devuelven el mapa actualizado y lo pasan por
-// el mismo callback para repintar sin otro pedido. `abrirAccion(accion, { plaza, dispositivoId, edificioId })`:
+// el mismo callback para repintar sin otro pedido. `abrirAccion(accion, { plaza, sector: delSector, dispositivoId, edificioId })`:
 // si viene, la hoja muestra un botón por cada `plaza.acciones`; si no, es solo lectura.
 // Un 404 llama a `onNoEncontrado`; un 403 SIN_MODULO, a `onSinModulo(mensaje)`. `recarga` cambia cuando
 // hay que volver a pedir el mapa.
@@ -139,8 +139,8 @@ export default function PlazasMapaScreen({
             const bloqueada = accion === 'fuera_servicio' && !!bloqueo;
             return (
               <React.Fragment key={accion}>
-                <CustomButton title={titulo} variant={accion === 'egresar' ? 'primary' : 'secondary'} disabled={bloqueada}
-                  onPress={() => abrirAccion(accion, { plaza, dispositivoId, edificioId })} />
+                <CustomButton title={titulo} variant={accion === 'egresar' || accion === 'ingresar' ? 'primary' : 'secondary'} disabled={bloqueada}
+                  onPress={() => abrirAccion(accion, { plaza, sector: delSector, dispositivoId, edificioId })} />
                 {bloqueada ? <Text style={[styles.filaValor, { color: theme.colors.textSoft, fontFamily: typography.medium }]}>{bloqueo}</Text> : null}
               </React.Fragment>
             );
