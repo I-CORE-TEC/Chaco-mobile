@@ -50,10 +50,21 @@ export default function PlazasIngresoScreen({ dispositivoId, plaza = null, secto
   const [clavesServidor, setClavesServidor] = useState({});
   const [aviso, setAviso] = useState('');
   const [enviando, setEnviando] = useState(false);
+  // 429 de la búsqueda: el botón no manda hasta que pase el Retry-After, con cuenta regresiva.
+  const [esperaHasta, setEsperaHasta] = useState(0);
+  const [ahora, setAhora] = useState(Date.now());
   const enviandoRef = useRef(false);
   const busquedaRef = useRef(0);
   const montado = useRef(true);
   useEffect(() => { montado.current = true; return () => { montado.current = false; }; }, []);
+
+  const esperando = esperaHasta > ahora;
+  useEffect(() => {
+    if (!esperando) return undefined;
+    const timer = setInterval(() => setAhora(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [esperando]);
+  const segundos = Math.max(1, Math.ceil((esperaHasta - ahora) / 1000));
 
   const ocupado = enviando || buscando || cargandoFormulario;
   const codigo = plaza?.codigo ?? '';
@@ -96,7 +107,7 @@ export default function PlazasIngresoScreen({ dispositivoId, plaza = null, secto
 
   // ---- Paso 1: persona ----
   const buscar = async () => {
-    if (ocupado) return;
+    if (ocupado || esperando) return;
     setIntentado(true);
     setErroresServidor({});
     setAviso('');
@@ -110,9 +121,16 @@ export default function PlazasIngresoScreen({ dispositivoId, plaza = null, secto
         setResultado(r.respuesta && typeof r.respuesta === 'object' ? r.respuesta : { encontrada: false });
         setIntentado(false);
       } else if (r.clasificacion.tipo === 'validacion') {
-        setErroresServidor(r.clasificacion.errores || {});
-        setAviso(r.clasificacion.mensaje);
+        // El error de campo (el DNI) se ve en el campo; el aviso general solo si no hay ninguno.
+        const errores = r.clasificacion.errores || {};
+        setErroresServidor(errores);
+        if (!Object.keys(errores).some((k) => k !== 'non_field_errors')) setAviso(r.clasificacion.mensaje);
       } else {
+        if (r.clasificacion.espera) {
+          const ahoraMs = Date.now();
+          setAhora(ahoraMs);
+          setEsperaHasta(ahoraMs + r.clasificacion.espera);
+        }
         mostrarError(r.clasificacion);
       }
     } finally {
@@ -174,7 +192,8 @@ export default function PlazasIngresoScreen({ dispositivoId, plaza = null, secto
       const errores = c.errores || {};
       setErroresServidor(errores);
       setClavesServidor(c.claves || {});
-      setAviso(c.mensaje);
+      const enCampo = Object.keys(c.claves || {}).length > 0 || (esAlta && CAMPOS_ALTA.some((campo) => errores[campo]));
+      setAviso(enCampo ? '' : c.mensaje);
       if (esAlta && CAMPOS_ALTA.some((campo) => errores[campo])) setPaso('persona');
       else if (Object.keys(c.claves || {}).length) setPaso('formulario');
     } else if (c.tipo === 'formulario_cambio') {
@@ -265,7 +284,8 @@ export default function PlazasIngresoScreen({ dispositivoId, plaza = null, secto
         <TextInput value={dni} onChangeText={cambiarDni} editable={!ocupado} accessibilityLabel="DNI de la persona" keyboardType="numeric" inputMode="numeric"
           maxLength={10} placeholderTextColor={theme.colors.textSoft} style={caja(erroresDni.length > 0 || errorDe('dni').length > 0)} />
         {mensajes([...erroresDni, ...errorDe('dni')], 'dni')}
-        {!resultado ? <CustomButton title="Buscar" size="L" iconLeft="search-outline" loading={buscando} disabled={ocupado} onPress={buscar} /> : null}
+        {!resultado ? <CustomButton title={esperando ? `Buscar en ${segundos} s` : 'Buscar'} size="L" iconLeft="search-outline" loading={buscando}
+          disabled={ocupado || esperando} onPress={buscar} /> : null}
       </View>
 
       {persona ? (
@@ -310,7 +330,10 @@ export default function PlazasIngresoScreen({ dispositivoId, plaza = null, secto
   const renderCampo = (field) => (
     <View key={field.id}>
       <CampoFormulario field={field} value={valores[field.clave] ?? ''}
-        onChange={(valor) => setValores((prev) => ({ ...prev, [field.clave]: valor }))}
+        onChange={(valor) => {
+          setValores((prev) => ({ ...prev, [field.clave]: valor }));
+          setClavesServidor((prev) => (prev[field.clave] ? { ...prev, [field.clave]: null } : prev));
+        }}
         busqueda={busqueda[field.clave] || ''}
         onBuscar={(t) => setBusqueda((prev) => ({ ...prev, [field.clave]: t }))}
         renderFecha={(props) => <FechaInput {...props} mostrarRotulo={false} />}

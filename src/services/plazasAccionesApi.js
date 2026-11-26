@@ -194,7 +194,11 @@ export const clasificarErrorPlaza = (error, contexto = 'cama') => {
   }
   if (status === 400 && !html) return { tipo: 'rechazo', mensaje: detalle || 'El servidor rechazó la acción.' };
   const transitoria = error?.network === true || html || !status || status >= 500 || status === 408 || status === 429;
-  if (transitoria) return { tipo: 'reintentable', mensaje: status === 429 ? 'El servidor pidió esperar: probá en unos segundos.' : TEXTO_REINTENTAR };
+  if (transitoria) {
+    // 429: `espera` (ms) sale del Retry-After; sin él, 5 s. Las pantallas lo usan para pausar el botón.
+    const espera = status === 429 ? (Number(error?.retryAfter) > 0 ? Number(error.retryAfter) : 5000) : null;
+    return { tipo: 'reintentable', mensaje: status === 429 ? 'El servidor pidió esperar: probá en unos segundos.' : TEXTO_REINTENTAR, ...(espera ? { espera } : {}) };
+  }
   return { tipo: 'rechazo', mensaje: detalle || error?.message || 'El servidor rechazó la acción.' };
 };
 

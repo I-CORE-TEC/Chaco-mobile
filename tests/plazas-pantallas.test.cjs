@@ -265,3 +265,18 @@ test('Mapa: con bloqueo, «Sacar de servicio» de la hoja va deshabilitado con e
     assert.ok(!reservar.props.disabled);
   } finally { await v.cierra(); }
 });
+
+test('Mapa: la hoja pasa el sector de la cama a abrirAccion (lo usa «Ingresar persona»)', async () => {
+  const {r, pantalla} = await preparar();
+  r.setFetch(async () => response(200, MAPA));
+  const normalizado = r.load('./plazasApi').normalizarMapa(MAPA);
+  const sectores = [];
+  const v = await montar(pantalla('PlazasMapaScreen'), {dispositivoId: 3, edificioId: 9, mapa: normalizado, onMapaActualizado() {},
+    abrirAccion: (accion, datos) => sectores.push(datos.sector && datos.sector.nombre)});
+  try {
+    await v.toca('Cama A1-01, ocupada, Gómez, Lucía');
+    await v.toca('Registrar egreso');
+    assert.ok(normalizado.sectores[0].nombre);
+    assert.deepEqual(sectores, [normalizado.sectores[0].nombre]);
+  } finally { await v.cierra(); }
+});

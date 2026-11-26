@@ -440,3 +440,67 @@ test('Cambiar el DNI descarta el resultado y obliga a buscar de nuevo', async ()
     assert.ok(!ui.button('Continuar') && ui.button('Buscar'));
   } finally { await ui.close(); }
 });
+
+test('Sin red: Buscar y el POST no salen a la red y se avisa', async () => {
+  const ui = await montar();
+  try {
+    await ui.escribir('DNI de la persona', '30111222');
+    await ui.pressButton('Buscar');
+    await ui.pressButton('Continuar');
+    ui.runtime.setOnline(false);
+    await ui.pressButton('Ingresar persona');
+    await confirmar(ui.alerts, 'Ingresar persona');
+    assert.ok(!post(ui), 'sin red no sale ningún POST');
+    const alerta = ui.alerts[ui.alerts.length - 1];
+    assert.equal(alerta[0], 'Sin conexión');
+    assert.equal(ui.listos.length, 0);
+  } finally { await ui.close(); }
+  const nuevo = await montar();
+  try {
+    nuevo.runtime.setOnline(false);
+    await nuevo.escribir('DNI de la persona', '30111222');
+    await nuevo.pressButton('Buscar');
+    assert.equal(nuevo.calls.length, 0, 'sin red no se busca');
+    assert.equal(nuevo.alerts[nuevo.alerts.length - 1][0], 'Sin conexión');
+  } finally { await nuevo.close(); }
+});
+
+test('429 en la búsqueda: Buscar queda deshabilitado con cuenta regresiva hasta el Retry-After', async () => {
+  const ui = await montar({'GET /api/emergencia/dispositivos/7/ingreso/persona/': () => response(429, {detail: 'Throttled'}, {'Retry-After': '30'})});
+  try {
+    await ui.escribir('DNI de la persona', '30111222');
+    await ui.pressButton('Buscar');
+    assert.equal(ui.calls.length, 1);
+    const boton = ui.tree.root.findAllByType('CustomButton').find(b => /^Buscar/.test(b.props.title));
+    assert.match(boton.props.title, /^Buscar en (29|30) s$/);
+    assert.equal(boton.props.disabled, true);
+    await renderer.act(async () => { await boton.props.onPress(); });
+    assert.equal(ui.calls.length, 1, 'durante la espera no se manda otra búsqueda');
+  } finally { await ui.close(); }
+});
+
+test('Un 400 en el DNI se ve una sola vez (en el campo) y el error de una clave se limpia al editarla', async () => {
+  const ui = await montar({'GET /api/emergencia/dispositivos/7/ingreso/persona/': () => response(400, {code: 'VALIDACION', detail: 'El DNI no es válido.', dni: ['El DNI no es válido.']})});
+  try {
+    await ui.escribir('DNI de la persona', '30111222');
+    await ui.pressButton('Buscar');
+    assert.equal(ui.labels().filter(l => l === 'El DNI no es válido.').length, 1);
+  } finally { await ui.close(); }
+  const f = await montar({
+    'GET /api/emergencia/dispositivos/7/ingreso/formulario/': () => response(200, FORM),
+    'POST /api/emergencia/dispositivos/7/ingresar/': () => response(400, {code: 'VALIDACION', detail: 'No sirve.', claves: {c9: 'Tiene que ser menor a 100.'}}),
+  });
+  try {
+    await f.escribir('DNI de la persona', '30111222');
+    await f.pressButton('Buscar');
+    await f.pressButton('Continuar');
+    await f.escribir('Cantidad de pertenencias', '500');
+    await f.pressButton('Continuar');
+    await f.pressButton('Ingresar persona');
+    await confirmar(f.alerts, 'Ingresar persona');
+    assert.equal(f.labels().filter(l => l === 'Tiene que ser menor a 100.').length, 1);
+    assert.ok(!f.labels().includes('No sirve.'), 'el aviso general no repite el error del campo');
+    await f.escribir('Cantidad de pertenencias', '50');
+    assert.ok(!f.labels().includes('Tiene que ser menor a 100.'));
+  } finally { await f.close(); }
+});

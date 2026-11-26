@@ -140,7 +140,7 @@ export default function PlazasMapaScreen({
             return (
               <React.Fragment key={accion}>
                 <CustomButton title={titulo} variant={accion === 'egresar' || accion === 'ingresar' ? 'primary' : 'secondary'} disabled={bloqueada}
-                  onPress={() => abrirAccion(accion, { plaza, dispositivoId, edificioId })} />
+                  onPress={() => abrirAccion(accion, { plaza, sector: delSector, dispositivoId, edificioId })} />
                 {bloqueada ? <Text style={[styles.filaValor, { color: theme.colors.textSoft, fontFamily: typography.medium }]}>{bloqueo}</Text> : null}
               </React.Fragment>
             );
