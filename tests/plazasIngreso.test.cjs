@@ -504,3 +504,29 @@ test('Un 400 en el DNI se ve una sola vez (en el campo) y el error de una clave 
     assert.ok(!f.labels().includes('Tiene que ser menor a 100.'));
   } finally { await f.close(); }
 });
+
+test('puede_dar_de_alta: se normaliza (true, false, ausente) y decide alta, aviso o persona', async () => {
+  const {runtime} = await montar({});
+  const p = runtime.load('./plazasIngresoApi');
+  assert.equal(p.normalizarBusquedaPersona({encontrada: false, puede_dar_de_alta: true}).puedeDarDeAlta, true);
+  assert.equal(p.normalizarBusquedaPersona({encontrada: false, puede_dar_de_alta: false}).puedeDarDeAlta, false);
+  assert.equal(p.normalizarBusquedaPersona({encontrada: false}).puedeDarDeAlta, true);
+  assert.equal(p.vistaDePersona({encontrada: false, puede_dar_de_alta: true}), 'alta');
+  assert.equal(p.vistaDePersona({encontrada: false}), 'alta');
+  assert.equal(p.vistaDePersona({encontrada: false, puede_dar_de_alta: false}), 'sin_permiso');
+  assert.equal(p.vistaDePersona(ROSA), 'persona');
+  assert.equal(p.vistaDePersona(null), null);
+});
+
+test('Sin permiso de alta: avisa en el paso del DNI, no muestra el alta y deja corregir el DNI', async () => {
+  const ui = await montar({'GET /api/emergencia/dispositivos/7/ingreso/persona/': () => response(200, {encontrada: false, puede_dar_de_alta: false})});
+  try {
+    await ui.escribir('DNI de la persona', '30111222');
+    await ui.pressButton('Buscar');
+    assert.ok(ui.labels().includes('La persona no está en el padrón y no tenés permiso para darla de alta.'));
+    assert.ok(!ui.labels().includes('Nombre'), 'no se pide el alta');
+    await ui.escribir('DNI de la persona', '30111223');
+    assert.ok(!ui.labels().includes('La persona no está en el padrón y no tenés permiso para darla de alta.'));
+    await ui.pressButton('Buscar');
+  } finally { await ui.close(); }
+});

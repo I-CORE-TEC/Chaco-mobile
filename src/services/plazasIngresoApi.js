@@ -107,3 +107,18 @@ export const respuestasDeIngreso = (campos = [], efectivas = {}) => {
 export const bloqueoDePersona = (respuesta) => (respuesta?.encontrada === true && respuesta?.alojada === true
   ? (texto(respuesta?.alojamiento?.mensaje) || 'La persona ya figura alojada. Registrá el egreso o el traslado antes de alojarla de nuevo.')
   : '');
+
+// Fuera del padrón el back dice `puede_dar_de_alta`; un back viejo no lo manda y vale `true` (como hoy: el POST rechaza con 403).
+export const normalizarBusquedaPersona = (respuesta) => {
+  const r = respuesta && typeof respuesta === 'object' ? respuesta : { encontrada: false };
+  return { ...r, puedeDarDeAlta: r.puede_dar_de_alta !== false };
+};
+
+export const TEXTO_SIN_PERMISO_ALTA = 'La persona no está en el padrón y no tenés permiso para darla de alta.';
+
+// Qué muestra el paso del DNI: 'persona' (está en el padrón), 'alta' (formulario de alta), 'sin_permiso' (aviso) o null (sin buscar).
+export const vistaDePersona = (respuesta) => {
+  if (!respuesta) return null;
+  if (respuesta.encontrada === true) return 'persona';
+  return normalizarBusquedaPersona(respuesta).puedeDarDeAlta ? 'alta' : 'sin_permiso';
+};
