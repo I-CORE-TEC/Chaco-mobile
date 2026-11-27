@@ -142,6 +142,8 @@ export default function EmergenciaApp({ onCambiarModulo }) {
   const [pantalla, setPantalla] = useState({ vista: 'inicio', uuid: null });
   const [recarga, setRecarga] = useState(0);
   const [plazasMapa, setPlazasMapa] = useState(null);
+  // Turno del re-pedido del mapa: una respuesta vieja (o de otro edificio abierto después) no pisa a la más nueva.
+  const turnoMapaPlazas = useRef(0);
   const edificioActual = useRef(null); // el edificio abierto AHORA (las respuestas tardías lo comparan)
   // El perfil (el guardado primero, el del back después; por subscribePerfil): decide las pestañas de la barra.
   const [perfil, setPerfil] = useState(null);
@@ -367,6 +369,7 @@ export default function EmergenciaApp({ onCambiarModulo }) {
   // Con UN solo edificio se entra directo al mapa (`unico`), y Atrás desde ese mapa va al inicio.
   edificioActual.current = pantalla.edificio || null;
   const elegirEdificio = (item, { unico = false } = {}) => {
+    turnoMapaPlazas.current += 1;
     setPlazasMapa(null);
     setPantalla({
       vista: 'plazas_mapa',
@@ -378,7 +381,7 @@ export default function EmergenciaApp({ onCambiarModulo }) {
     && String(mapa.edificio.id) === String(pantalla.edificio?.edificioId)
     && String(mapa.dispositivo.id) === String(pantalla.edificio?.dispositivoId);
   // El mapa que trae la propia pantalla del mapa: solo si es del edificio abierto (nunca pide otra vuelta: sería un bucle).
-  const actualizarMapaPlazas = (mapa) => { if (esDelEdificioActual(mapa)) setPlazasMapa(mapa); };
+  const actualizarMapaPlazas = (mapa) => { if (esDelEdificioActual(mapa)) { turnoMapaPlazas.current += 1; setPlazasMapa(mapa); } };
   const guardarFiltrosEstadias = (filtros) => setPantalla((actual) => ({ ...actual, filtrosEstadias: filtros }));
   const verMapaPlazas = () => setPantalla((actual) => ({ ...actual, vista: 'plazas_mapa' }));
   const verEstadiasPlazas = () => setPantalla((actual) => ({ ...actual, vista: 'plazas_estadias' }));
@@ -406,12 +409,15 @@ export default function EmergenciaApp({ onCambiarModulo }) {
     let aceptado = false;
     if (mapa) {
       const nuevo = normalizarMapa(mapa);
-      if (esDelEdificioActual(nuevo)) { setPlazasMapa(nuevo); aceptado = true; }
+      if (esDelEdificioActual(nuevo)) { turnoMapaPlazas.current += 1; setPlazasMapa(nuevo); aceptado = true; }
     }
     // Desde estadías, la solapa «Estadías · N» sale del mapa: si no hay uno válido se vuelve a pedir el del edificio.
     if (!aceptado && pantalla.accion?.origen === 'plazas_estadias' && pantalla.edificio) {
       const { dispositivoId, edificioId } = pantalla.edificio;
+      const turno = turnoMapaPlazas.current + 1;
+      turnoMapaPlazas.current = turno;
       getMapa(dispositivoId, edificioId).then((pedido) => {
+        if (turnoMapaPlazas.current !== turno) return;
         const nuevo = normalizarMapa(pedido);
         const edificio = edificioActual.current;
         if (String(nuevo.dispositivo.id) === String(dispositivoId) && String(nuevo.edificio.id) === String(edificioId)
