@@ -34,16 +34,20 @@ export default function PlazasMapaScreen({
   const recargaInicial = useRef(recarga);
   const alActualizar = useRef(onMapaActualizado);
   alActualizar.current = onMapaActualizado;
+  // Contador de turno: un pedido que vuelve tarde (otro anterior) no pisa al más nuevo.
+  const turno = useRef(0);
 
   const cargar = useCallback(async ({ silencioso = false } = {}) => {
+    const numero = turno.current + 1;
+    turno.current = numero;
     if (silencioso) setRefrescando(true);
     try {
       const nuevo = await getMapa(dispositivoId, edificioId);
-      if (!montado.current) return;
+      if (!montado.current || turno.current !== numero) return;
       alActualizar.current?.(nuevo);
       setError(null);
     } catch (e) {
-      if (!montado.current) return;
+      if (!montado.current || turno.current !== numero) return;
       const clasificado = clasificarError(e);
       if (clasificado.tipo === 'no_encontrado') {
         onNoEncontrado?.();
@@ -55,7 +59,7 @@ export default function PlazasMapaScreen({
       }
       setError(clasificado);
     } finally {
-      if (montado.current) {
+      if (montado.current && turno.current === numero) {
         setCargando(false);
         setRefrescando(false);
       }
@@ -141,7 +145,7 @@ export default function PlazasMapaScreen({
               <React.Fragment key={accion}>
                 <CustomButton title={titulo} variant={accion === 'egresar' || accion === 'ingresar' ? 'primary' : 'secondary'} disabled={bloqueada}
                   onPress={() => abrirAccion(accion, { plaza, sector: delSector, dispositivoId, edificioId })} />
-                {bloqueada ? <Text style={[styles.filaValor, { color: theme.colors.textSoft, fontFamily: typography.medium }]}>{bloqueo}</Text> : null}
+                {bloqueada ? <Text style={[styles.bloqueoTexto, { color: theme.colors.textSoft, fontFamily: typography.medium }]}>{bloqueo}</Text> : null}
               </React.Fragment>
             );
           })}
@@ -206,4 +210,5 @@ const styles = StyleSheet.create({
   filaDetalle: { flexDirection: 'row', gap: 12 },
   filaTitulo: { width: 90, fontSize: fontSizes.sm },
   filaValor: { flex: 1, fontSize: fontSizes.sm },
+  bloqueoTexto: { flex: 1, fontSize: fontSizes.sm },
 });

@@ -367,6 +367,7 @@ export default function EmergenciaApp({ onCambiarModulo }) {
   // Con UN solo edificio se entra directo al mapa (`unico`), y Atrás desde ese mapa va al inicio.
   edificioActual.current = pantalla.edificio || null;
   const elegirEdificio = (item, { unico = false } = {}) => {
+    turnoMapaPlazas.current += 1;
     setPlazasMapa(null);
     setPantalla({
       vista: 'plazas_mapa',
@@ -374,6 +375,8 @@ export default function EmergenciaApp({ onCambiarModulo }) {
       edificio: { dispositivoId: item.dispositivo.id, edificioId: item.edificio.id, nombre: item.edificio.nombre || item.dispositivo.nombre },
     });
   };
+  // Turno del re-pedido del mapa: una respuesta vieja (o de otro edificio abierto después) no pisa a la más nueva.
+  const turnoMapaPlazas = useRef(0);
   const esDelEdificioActual = (mapa) => mapa?.edificio?.id != null && mapa?.dispositivo?.id != null
     && String(mapa.edificio.id) === String(pantalla.edificio?.edificioId)
     && String(mapa.dispositivo.id) === String(pantalla.edificio?.dispositivoId);
@@ -406,12 +409,15 @@ export default function EmergenciaApp({ onCambiarModulo }) {
     let aceptado = false;
     if (mapa) {
       const nuevo = normalizarMapa(mapa);
-      if (esDelEdificioActual(nuevo)) { setPlazasMapa(nuevo); aceptado = true; }
+      if (esDelEdificioActual(nuevo)) { turnoMapaPlazas.current += 1; setPlazasMapa(nuevo); aceptado = true; }
     }
     // Desde estadías, la solapa «Estadías · N» sale del mapa: si no hay uno válido se vuelve a pedir el del edificio.
     if (!aceptado && pantalla.accion?.origen === 'plazas_estadias' && pantalla.edificio) {
       const { dispositivoId, edificioId } = pantalla.edificio;
+      const turno = turnoMapaPlazas.current + 1;
+      turnoMapaPlazas.current = turno;
       getMapa(dispositivoId, edificioId).then((pedido) => {
+        if (turnoMapaPlazas.current !== turno) return;
         const nuevo = normalizarMapa(pedido);
         const edificio = edificioActual.current;
         if (String(nuevo.dispositivo.id) === String(dispositivoId) && String(nuevo.edificio.id) === String(edificioId)

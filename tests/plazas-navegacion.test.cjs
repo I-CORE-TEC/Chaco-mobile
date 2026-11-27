@@ -78,7 +78,7 @@ async function montarApp() {
     '../screens/StockAjusteScreen': {__esModule: true, default: () => null},
     '../services/emergenciaPerfil': {getPerfilGuardado: async () => null, subscribePerfil: () => () => {}},
     '../services/plazasApi': {normalizarMapa: mapa => ({...mapa, normalizado: true}),
-      getMapa: async (d, e) => { pedidosMapa.push([d, e]); return respuestaMapa.valor; }},
+      getMapa: async (d, e) => { pedidosMapa.push([d, e]); return respuestaMapa.cola?.length ? respuestaMapa.cola.shift() : respuestaMapa.valor; }},
     '@react-native-community/netinfo': {__esModule: true, default: {addEventListener: () => () => {}}},
     '../services/emergenciaLimpieza': {depurarBorradoresFicha: async () => {}},
     '../services/emergenciaCola': {syncPendientes: async () => ({}), getPendingCount: async () => 0, getResumenPendientes: async () => ({}),
@@ -264,6 +264,26 @@ test('Plazas: desde estadías, un mapa descartado se vuelve a pedir y los filtro
     await ui.hacer(() => ui.p.cambio.onListo({...MAPA_9, resumen: {ocupadas: 8}}));
     assert.equal(ui.pedidosMapa.length, 1);
     assert.equal(ui.p.estadias.total, 8);
+  } finally { await ui.close(); }
+});
+
+test('Plazas: dos re-pedidos del mapa desde estadías, el primero resuelve último -> queda el mapa del segundo', async () => {
+  const ui = await montarApp();
+  try {
+    await alMapa(ui);
+    await ui.hacer(() => ui.p.mapa.onVerEstadias());
+    const diferido = () => { let resolver; const promesa = new Promise(r => { resolver = r; }); return {promesa, resolver}; };
+    const primero = diferido();
+    const segundo = diferido();
+    ui.respuestaMapa.cola = [primero.promesa, segundo.promesa];
+    await ui.hacer(() => ui.p.estadias.abrirAccion('reubicar', {estadia: {id: 1}}));
+    await ui.hacer(() => ui.p.cambio.onListo(null));
+    await ui.hacer(() => ui.p.estadias.abrirAccion('reubicar', {estadia: {id: 1}}));
+    await ui.hacer(() => ui.p.cambio.onListo(null));
+    assert.equal(ui.pedidosMapa.length, 2);
+    await ui.hacer(async () => segundo.resolver({...MAPA_9, resumen: {ocupadas: 7}}));
+    await ui.hacer(async () => primero.resolver({...MAPA_9, resumen: {ocupadas: 2}}));
+    assert.equal(ui.p.estadias.total, 7, 'la respuesta vieja que llegó tarde no pisa a la nueva');
   } finally { await ui.close(); }
 });
 

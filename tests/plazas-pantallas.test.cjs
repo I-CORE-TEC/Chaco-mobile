@@ -249,6 +249,63 @@ test('Estadías: al cambiar de filtro se vacía la lista y el «Ver más» mient
   } finally { await v.cierra(); }
 });
 
+test('Mapa: dos pedidos, el primero resuelve último -> solo se informa el mapa del segundo', async () => {
+  const {r, pantalla} = await preparar();
+  const pendientes = [];
+  r.setFetch(() => new Promise(resolve => { pendientes.push(resolve); }));
+  const Mapa = pantalla('PlazasMapaScreen');
+  const recibidos = [];
+  const props = {dispositivoId: 3, edificioId: 9, mapa: null, onMapaActualizado: m => { recibidos.push(m.resumen.total); }, recarga: 0};
+  const v = await montar(Mapa, props);
+  try {
+    await renderer.act(async () => { v.tree.update(React.createElement(Mapa, {...props, recarga: 1})); await esperar(); });
+    assert.equal(pendientes.length, 2);
+    const con = total => response(200, {...MAPA, resumen: {...MAPA.resumen, total}});
+    await renderer.act(async () => { pendientes[1](con(22)); await esperar(); });
+    await renderer.act(async () => { pendientes[0](con(11)); await esperar(); });
+    assert.deepEqual(recibidos, [22], 'la respuesta vieja que llega última se descarta');
+  } finally { await v.cierra(); }
+});
+
+test('Estadías: filtros iniciales y onFiltros al cambiar filtros', async () => {
+  const {r, pantalla} = await preparar();
+  const pedidos = [];
+  r.setFetch(async (url) => { pedidos.push(String(url).replace('https://example.test', '')); return response(200, {count: 0, next: null, previous: null, results: []}); });
+  const filtros = [];
+  const sectores = [{id: 1, nombre: 'Aula 1'}, {id: 2, nombre: 'Aula 2'}];
+  const v = await montar(pantalla('PlazasEstadiasScreen'), {dispositivoId: 3, edificioId: 9, sectores, total: 0,
+    estadoInicial: 'egresada', sectorInicial: 2, onFiltros: f => filtros.push(f)});
+  try {
+    assert.ok(pedidos[0].endsWith('/estadias/?estado=egresada&sector=2'), 'pide con los filtros iniciales');
+    assert.equal(JSON.stringify(filtros[0]), JSON.stringify({estado: 'egresada', sector: 2}));
+    await v.toca('Filtrar: Alojadas');
+    assert.equal(JSON.stringify(filtros.at(-1)), JSON.stringify({estado: 'activa', sector: 2}));
+    await v.toca('Filtrar: Aula 1');
+    assert.equal(JSON.stringify(filtros.at(-1)), JSON.stringify({estado: 'activa', sector: 1}));
+  } finally { await v.cierra(); }
+});
+
+test('Estadías: al cambiar de edificio no queda ni se muestra lo del edificio anterior (respuesta tardía descartada)', async () => {
+  const {r, pantalla} = await preparar();
+  const pendientes = [];
+  r.setFetch((url) => new Promise(resolve => { pendientes.push({url: String(url), resolve}); }));
+  const Estadias = pantalla('PlazasEstadiasScreen');
+  const item = (id, nombre) => ({id, persona: {nombre, dni: null}, sector: {id: 1, nombre: 'Aula 1'}, plaza: {id, codigo: `A-${id}`},
+    fecha_ingreso: '2026-11-18T21:40:00-03:00', fecha_egreso: null, estado: 'activa', emergencia: null, acciones: []});
+  const lista = (...items) => response(200, {count: items.length, next: null, previous: null, results: items});
+  const props = {dispositivoId: 3, edificioId: 9, sectores: [], total: 1};
+  const v = await montar(Estadias, props);
+  try {
+    await renderer.act(async () => { v.tree.update(React.createElement(Estadias, {...props, edificioId: 10})); await esperar(); });
+    assert.equal(pendientes.length, 2);
+    assert.ok(pendientes[1].url.includes('/edificios/10/'));
+    await renderer.act(async () => { pendientes[1].resolve(lista(item(2, 'Persona del B'))); await esperar(); });
+    await renderer.act(async () => { pendientes[0].resolve(lista(item(1, 'Persona del A'))); await esperar(); });
+    assert.ok(v.textos().includes('Persona del B'));
+    assert.ok(!v.textos().includes('Persona del A'), 'la lista del edificio anterior no se pinta');
+  } finally { await v.cierra(); }
+});
+
 test('Mapa: con bloqueo, «Sacar de servicio» de la hoja va deshabilitado con el texto debajo', async () => {
   const {r, pantalla} = await preparar();
   r.setFetch(async () => response(200, MAPA));
