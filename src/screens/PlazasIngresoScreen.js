@@ -10,7 +10,7 @@ import { useToast } from '../context/ToastContext';
 import { TEXTO_SIN_RED, intentarAccion } from '../services/plazasAccionesApi';
 import {
   SEXOS_INGRESO, bloqueoDePersona, buscarPersonaIngreso, formularioDeIngreso, getFormularioIngreso, ingresarPersona,
-  respuestasDeIngreso, soloDigitos, validarPersonaNueva,
+  TEXTO_SIN_PERMISO_ALTA, normalizarBusquedaPersona, respuestasDeIngreso, soloDigitos, validarPersonaNueva, vistaDePersona,
 } from '../services/plazasIngresoApi';
 import { evaluarDiseno, problemasDelDiseno } from '../services/definicionFormulario';
 import { dniConPuntos } from '../services/plazasApi';
@@ -71,7 +71,8 @@ export default function PlazasIngresoScreen({ dispositivoId, plaza = null, secto
   const nombreSector = sector?.nombre || plaza?.sector?.nombre || '';
   const persona = resultado?.encontrada ? resultado.persona : null;
   const bloqueo = bloqueoDePersona(resultado);
-  const esAlta = resultado?.encontrada === false;
+  const esAlta = vistaDePersona(resultado) === 'alta';
+  const sinPermisoAlta = vistaDePersona(resultado) === 'sin_permiso';
   const datosAlta = { dni, ...alta };
 
   const hayCambios = dni.trim() !== '' || alta.nombre.trim() !== '' || alta.apellido.trim() !== '' || alta.sexo !== ''
@@ -118,7 +119,7 @@ export default function PlazasIngresoScreen({ dispositivoId, plaza = null, secto
       const r = await intentarAccion(() => buscarPersonaIngreso(dispositivoId, dni), 'cama');
       if (!montado.current || turno !== busquedaRef.current) return;
       if (r.ok) {
-        setResultado(r.respuesta && typeof r.respuesta === 'object' ? r.respuesta : { encontrada: false });
+        setResultado(normalizarBusquedaPersona(r.respuesta));
         setIntentado(false);
       } else if (r.clasificacion.tipo === 'validacion') {
         // El error de campo (el DNI) se ve en el campo; el aviso general solo si no hay ninguno.
@@ -297,6 +298,10 @@ export default function PlazasIngresoScreen({ dispositivoId, plaza = null, secto
         </View>
       ) : null}
 
+      {sinPermisoAlta ? (
+        <Text accessibilityRole="alert" style={[styles.error, { color: theme.colors.danger, fontFamily: typography.semibold }]}>{TEXTO_SIN_PERMISO_ALTA}</Text>
+      ) : null}
+
       {esAlta ? (
         <View style={tarjeta}>
           <Text accessibilityRole="header" style={titulo}>La persona no está en el padrón</Text>
@@ -319,7 +324,7 @@ export default function PlazasIngresoScreen({ dispositivoId, plaza = null, secto
         </View>
       ) : null}
 
-      {resultado && !bloqueo ? (
+      {resultado && !bloqueo && !sinPermisoAlta ? (
         <CustomButton title="Continuar" size="L" iconRight="arrow-forward" loading={cargandoFormulario} disabled={ocupado} onPress={seguirDePersona} />
       ) : null}
     </>
