@@ -142,6 +142,8 @@ export default function EmergenciaApp({ onCambiarModulo }) {
   const [pantalla, setPantalla] = useState({ vista: 'inicio', uuid: null });
   const [recarga, setRecarga] = useState(0);
   const [plazasMapa, setPlazasMapa] = useState(null);
+  // Turno del re-pedido del mapa: una respuesta vieja (o de otro edificio abierto después) no pisa a la más nueva.
+  const turnoMapaPlazas = useRef(0);
   const edificioActual = useRef(null); // el edificio abierto AHORA (las respuestas tardías lo comparan)
   // El perfil (el guardado primero, el del back después; por subscribePerfil): decide las pestañas de la barra.
   const [perfil, setPerfil] = useState(null);
@@ -375,13 +377,11 @@ export default function EmergenciaApp({ onCambiarModulo }) {
       edificio: { dispositivoId: item.dispositivo.id, edificioId: item.edificio.id, nombre: item.edificio.nombre || item.dispositivo.nombre },
     });
   };
-  // Turno del re-pedido del mapa: una respuesta vieja (o de otro edificio abierto después) no pisa a la más nueva.
-  const turnoMapaPlazas = useRef(0);
   const esDelEdificioActual = (mapa) => mapa?.edificio?.id != null && mapa?.dispositivo?.id != null
     && String(mapa.edificio.id) === String(pantalla.edificio?.edificioId)
     && String(mapa.dispositivo.id) === String(pantalla.edificio?.dispositivoId);
   // El mapa que trae la propia pantalla del mapa: solo si es del edificio abierto (nunca pide otra vuelta: sería un bucle).
-  const actualizarMapaPlazas = (mapa) => { if (esDelEdificioActual(mapa)) setPlazasMapa(mapa); };
+  const actualizarMapaPlazas = (mapa) => { if (esDelEdificioActual(mapa)) { turnoMapaPlazas.current += 1; setPlazasMapa(mapa); } };
   const guardarFiltrosEstadias = (filtros) => setPantalla((actual) => ({ ...actual, filtrosEstadias: filtros }));
   const verMapaPlazas = () => setPantalla((actual) => ({ ...actual, vista: 'plazas_mapa' }));
   const verEstadiasPlazas = () => setPantalla((actual) => ({ ...actual, vista: 'plazas_estadias' }));

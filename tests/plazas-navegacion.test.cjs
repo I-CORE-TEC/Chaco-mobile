@@ -287,6 +287,63 @@ test('Plazas: dos re-pedidos del mapa desde estadías, el primero resuelve últi
   } finally { await ui.close(); }
 });
 
+const diferidoMapa = () => { let resolver; const promesa = new Promise(r => { resolver = r; }); return {promesa, resolver}; };
+
+test('Plazas: un re-pedido viejo no pisa el mapa que una acción aceptó después', async () => {
+  const ui = await montarApp();
+  try {
+    await alMapa(ui);
+    await ui.hacer(() => ui.p.mapa.onVerEstadias());
+    const viejo = diferidoMapa();
+    ui.respuestaMapa.cola = [viejo.promesa];
+    await ui.hacer(() => ui.p.estadias.abrirAccion('reubicar', {estadia: {id: 1}}));
+    await ui.hacer(() => ui.p.cambio.onListo(null));
+    await ui.hacer(() => ui.p.estadias.abrirAccion('reubicar', {estadia: {id: 1}}));
+    await ui.hacer(() => ui.p.cambio.onListo({...MAPA_9, resumen: {ocupadas: 5}}));
+    assert.equal(ui.p.estadias.total, 5);
+    await ui.hacer(async () => viejo.resolver({...MAPA_9, resumen: {ocupadas: 2}}));
+    assert.equal(ui.p.estadias.total, 5, 'el re-pedido viejo no pisa el mapa aceptado');
+  } finally { await ui.close(); }
+});
+
+test('Plazas: un re-pedido viejo no pisa el mapa que informó la pantalla del mapa', async () => {
+  const ui = await montarApp();
+  try {
+    await alMapa(ui);
+    await ui.hacer(() => ui.p.mapa.onVerEstadias());
+    const viejo = diferidoMapa();
+    ui.respuestaMapa.cola = [viejo.promesa];
+    await ui.hacer(() => ui.p.estadias.abrirAccion('reubicar', {estadia: {id: 1}}));
+    await ui.hacer(() => ui.p.cambio.onListo(null));
+    await ui.hacer(() => ui.p.estadias.onVerCamas());
+    await ui.hacer(() => ui.p.mapa.onMapaActualizado({...MAPA_9, resumen: {ocupadas: 6}}));
+    await ui.hacer(() => ui.p.mapa.onVerEstadias());
+    assert.equal(ui.p.estadias.total, 6);
+    await ui.hacer(async () => viejo.resolver({...MAPA_9, resumen: {ocupadas: 2}}));
+    assert.equal(ui.p.estadias.total, 6, 'el re-pedido viejo no pisa el mapa informado por la pantalla');
+  } finally { await ui.close(); }
+});
+
+test('Plazas: elegir otro edificio y volver invalida el re-pedido pendiente', async () => {
+  const ui = await montarApp();
+  try {
+    await alMapa(ui);
+    await ui.hacer(() => ui.p.mapa.onVerEstadias());
+    const viejo = diferidoMapa();
+    ui.respuestaMapa.cola = [viejo.promesa];
+    await ui.hacer(() => ui.p.estadias.abrirAccion('reubicar', {estadia: {id: 1}}));
+    await ui.hacer(() => ui.p.cambio.onListo(null));
+    await ui.hacer(() => ui.p.estadias.onVerCamas());
+    await ui.atras();
+    assert.ok(ui.montada('edificios'));
+    await ui.hacer(() => ui.p.edificios.onElegir(EDIF_9, {unico: false}));
+    await ui.hacer(() => ui.p.mapa.onVerEstadias());
+    assert.ok(!ui.p.estadias.total, 'el mapa del edificio nuevo todavía no llegó');
+    await ui.hacer(async () => viejo.resolver({...MAPA_9, resumen: {ocupadas: 2}}));
+    assert.ok(!ui.p.estadias.total, 'la respuesta del pedido anterior al cambio de edificio se descarta');
+  } finally { await ui.close(); }
+});
+
 test('Plazas: ingresar abre la pantalla de ingreso con la cama y el sector; onListo repinta y vuelve al mapa', async () => {
   const ui = await montarApp();
   try {
